@@ -1,0 +1,16 @@
+{
+  "challenge_module": "ComparatorChallenges.PhysicalSweepIdentification",
+  "solution_module": "OAI.Probability.BinarySweep.Processes.SweepIdentification",
+  "theorem_names": [
+    "OAI.BinaryCoordinateSweeps.physical_sweep_identification",
+    "OAI.BinaryCoordinateSweeps.physical_law_is_sweep_law"
+  ],
+  "definition_names": [],
+  "permitted_axioms": [
+    "propext",
+    "Quot.sound",
+    "Classical.choice"
+  ],
+  "enable_nanoda": false,
+  "notes": "Family 238, gap G7: the physical-shuffle law identification that lean/docs/238.md marks as not included for the binary-sweep formalization. The definitions in the challenge are verbatim copies of the solution-side model modules (BinarySweep/Model.lean, BinarySweep/Processes/Basic.lean). The statement-level conventions (application order, rotation direction, layer-to-step coin correspondence, rotation reindex i -> i+1+j mod d+1) were pinned by exhaustive finite probes before writing (d=1: 16/16 histories; d=2: 4096/4096 histories, vs 2048/4096 for the order-preserving alternative). Solution module OAI.Probability.BinarySweep.Processes.SweepIdentification delivered 2026-10-10: full proof, zero sorry, axioms exactly [propext, Quot.sound, Classical.choice]."
+}

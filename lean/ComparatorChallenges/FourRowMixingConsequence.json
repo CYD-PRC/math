@@ -1,0 +1,21 @@
+{
+  "challenge_module": "ComparatorChallenges.FourRowMixingConsequence",
+  "solution_module": "OAI.Combinatorics.Permanent.ThorpMixingConsequence",
+  "theorem_names": [
+    "OAI.four_row_moment_mixing_consequence"
+  ],
+  "definition_names": [
+    "OAI.ThorpFourRow.FixedMomentDegreeSaving",
+    "OAI.ThorpFourRow.OptimalOrderThorpMixing",
+    "OAI.ThorpFourRow.sweepMomentTrace",
+    "OAI.ThorpFourRow.fourierAt",
+    "OAI.ThorpFourRow.physicalLaw"
+  ],
+  "permitted_axioms": [
+    "propext",
+    "Quot.sound",
+    "Classical.choice"
+  ],
+  "enable_nanoda": false,
+  "notes": "Statement-only for now: the challenge states the segment the 238 scope note excludes (Theorem 1.2 + the optimal-order mixing consequence). The solution module is pending; this is the repo's first challenge whose solution module does not yet exist."
+}

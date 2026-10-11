@@ -1,0 +1,18 @@
+{
+  "challenge_module": "ComparatorChallenges.PartialPermutationConvergence",
+  "solution_module": "OAI.RepresentationTheory.PartialPermutation.Amplification",
+  "theorem_names": [
+    "OAI.PartialPermutation.fourier_amplification_operator",
+    "OAI.PartialPermutation.fourier_amplification_hs",
+    "OAI.PartialPermutation.four_convolution_convergence",
+    "OAI.PartialPermutation.two_convolution_convergence"
+  ],
+  "definition_names": [],
+  "permitted_axioms": [
+    "propext",
+    "Quot.sound",
+    "Classical.choice"
+  ],
+  "enable_nanoda": false,
+  "notes": "Family 238, gap G1: the asymptotic convergence conclusions that lean/docs/238.md marks as outside the selected finite estimate for the partial-permutation formalization. The challenge imports the repository's own modules (BinarySweep/Model.lean for convolution/totalVariation/uniformLaw/realSign, PartialPermutation/Model.lean for mass/complexFourier/IsUnitary/blockSubgroup) — no parallel copies. Verbatim paper quotes with line anchors are in the challenge file's header. REGISTERED NARROWING: the paper's Proposition 2.5 offers an either/or pair of approximation hypotheses (subprobability with mass -> 1, OR probability with TV -> 0); only the first branch is encoded, because Corollary 3.3's own proof (paper L627-628) goes through the subprobability branch. The filter non-vacuity is proved (eightDivisible_neBot). Solution module under development; statements pinned 2026-10-10."
+}

@@ -1130,6 +1130,761 @@ lemma nontrivialEnergy_convPower_le {n : ℕ} (hn : 2 ≤ n) {A β : ℝ} (hA : 
 
 end EnergySplit
 
+/-! ## Slice 4a: presentation transport along a linear equivalence
+
+Why this exists (the probe record of 2026-10-11, RECON-G1 §19): applying the
+challenge's `Type*`-quantified operator-norm hypothesis directly at
+`irreducibleRep c` does not elaborate — the instance-path unification over the
+giant subtype carrier `↥(irreducibleSpace c)` diverges (whnf/isDefEq timeouts
+at 200k and 1.6M heartbeats). The clean carrier `EuclideanSpace ℂ (ULift (Fin d))`
+accepts the same application quickly (probe Q13). So each irreducible
+representation is transported along a linear (isometry) equivalence to the
+clean carrier, the hypothesis is consumed there, and the bound is transported
+back through norm invariance under conjugation.
+
+What the transport preserves (per R-2): the dimension (`conjRep_finrank`),
+irreducibility (`conjRep_isIrreducible`), unitarity (`conjRep_isUnitary`),
+the operator-norm value of any endomorphism (`opNorm_conj`), and the
+Hilbert–Schmidt norm value (`hsNormSq_conj`).
+
+Binder-order discipline: every `Representation`/`Module.End`-typed argument
+is elaborated in a plain `[AddCommGroup] [Module]` context (before any normed
+binders enter the telescope) — the idiom that keeps applications to
+`irreducibleRep c` cheap (the `complexFourier` idiom of DeficitPlancherel).
+-/
+
+section PresentationTransport
+
+variable {G : Type} [Group G] [Fintype G]
+
+/-- Conjugating a representation along a linear equivalence: `e ∘ ρ g ∘ e⁻¹`. -/
+noncomputable def conjRep {V : Type*} [AddCommGroup V] [Module ℂ V] {W : Type*}
+    [AddCommGroup W] [Module ℂ W] (e : V ≃ₗ[ℂ] W) (ρ : Representation ℂ G V) :
+    Representation ℂ G W :=
+  (LinearEquiv.conjRingEquiv e).toMonoidHom.comp ρ
+
+omit [Fintype G] in
+lemma conjRep_apply {V : Type*} [AddCommGroup V] [Module ℂ V] {W : Type*}
+    [AddCommGroup W] [Module ℂ W] (e : V ≃ₗ[ℂ] W) (ρ : Representation ℂ G V) (g : G) (w : W) :
+    conjRep e ρ g w = e (ρ g (e.symm w)) := rfl
+
+omit [Fintype G] in
+lemma conjRep_eq_conj {V : Type*} [AddCommGroup V] [Module ℂ V] {W : Type*}
+    [AddCommGroup W] [Module ℂ W] (e : V ≃ₗ[ℂ] W) (ρ : Representation ℂ G V) (g : G) :
+    conjRep e ρ g = e.conj (ρ g) :=
+  LinearMap.ext fun w => (conjRep_apply e ρ g w).trans
+    (LinearEquiv.conj_apply_apply e (ρ g) w).symm
+
+/-- The transported representation has the same dimension. -/
+lemma conjRep_finrank {V : Type*} [AddCommGroup V] [Module ℂ V] {W : Type*}
+    [AddCommGroup W] [Module ℂ W] (e : V ≃ₗ[ℂ] W) :
+    Module.finrank ℂ V = Module.finrank ℂ W := e.finrank_eq
+
+/-- The Fourier transform of the transported representation is the
+conjugation of the Fourier transform. -/
+lemma complexFourier_conjRep {V : Type*} [AddCommGroup V] [Module ℂ V] {W : Type*}
+    [AddCommGroup W] [Module ℂ W] (e : V ≃ₗ[ℂ] W) (ρ : Representation ℂ G V) (F : G → ℂ) :
+    complexFourier (conjRep e ρ) F = e.conj (complexFourier ρ F) := by
+  show (∑ g, F g • conjRep e ρ g) = e.conj (∑ g, F g • ρ g)
+  rw [map_sum]
+  apply Finset.sum_congr rfl
+  intro g _
+  rw [map_smul, conjRep_eq_conj]
+
+/-- Conjugation by a linear equivalence transports subrepresentations. -/
+noncomputable def subrepConjOrderIso {V : Type*} [AddCommGroup V] [Module ℂ V] {W : Type*}
+    [AddCommGroup W] [Module ℂ W] (e : V ≃ₗ[ℂ] W) (ρ : Representation ℂ G V) :
+    Subrepresentation (conjRep e ρ) ≃o Subrepresentation ρ where
+  toFun U := ⟨U.toSubmodule.map e.symm.toLinearMap, by
+    intro g v hv
+    obtain ⟨w, hw, rfl⟩ := Submodule.mem_map.mp hv
+    apply Submodule.mem_map.mpr
+    refine ⟨conjRep e ρ g w, U.apply_mem_toSubmodule g hw, ?_⟩
+    show e.symm (e (ρ g (e.symm w))) = ρ g (e.symm w)
+    rw [LinearEquiv.symm_apply_apply]⟩
+  invFun T := ⟨T.toSubmodule.map e.toLinearMap, by
+    intro g v hv
+    obtain ⟨w, hw, rfl⟩ := Submodule.mem_map.mp hv
+    apply Submodule.mem_map.mpr
+    refine ⟨ρ g w, T.apply_mem_toSubmodule g hw, ?_⟩
+    show e (ρ g w) = e (ρ g (e.symm (e w)))
+    rw [LinearEquiv.symm_apply_apply]⟩
+  left_inv U := Subrepresentation.ext (by
+    show (U.toSubmodule.map e.symm.toLinearMap).map e.toLinearMap = U.toSubmodule
+    rw [← Submodule.map_comp]
+    have hid : e.toLinearMap ∘ₗ e.symm.toLinearMap = LinearMap.id :=
+      LinearMap.ext fun w => e.apply_symm_apply w
+    rw [hid, Submodule.map_id])
+  right_inv T := Subrepresentation.ext (by
+    show (T.toSubmodule.map e.toLinearMap).map e.symm.toLinearMap = T.toSubmodule
+    rw [← Submodule.map_comp]
+    have hid : e.symm.toLinearMap ∘ₗ e.toLinearMap = LinearMap.id :=
+      LinearMap.ext fun v => e.symm_apply_apply v
+    rw [hid, Submodule.map_id])
+  map_rel_iff' := by
+    intro U₁ U₂
+    show (U₁.toSubmodule.map e.symm.toLinearMap ≤ U₂.toSubmodule.map e.symm.toLinearMap) ↔
+      U₁.toSubmodule ≤ U₂.toSubmodule
+    constructor
+    · intro h v hv
+      have hmem : e.symm v ∈ U₁.toSubmodule.map e.symm.toLinearMap :=
+        Submodule.mem_map.mpr ⟨v, hv, rfl⟩
+      obtain ⟨w, hw, hwe⟩ := Submodule.mem_map.mp (h hmem)
+      have h2 : e.symm.toEquiv w = e.symm.toEquiv v := hwe
+      have : w = v := e.symm.toEquiv.injective h2
+      subst this
+      exact hw
+    · intro h
+      exact Submodule.map_mono h
+
+omit [Fintype G] in
+/-- Conjugation preserves irreducibility (the subrepresentation lattices are
+order-isomorphic). -/
+lemma conjRep_isIrreducible {V : Type*} [AddCommGroup V] [Module ℂ V] {W : Type*}
+    [AddCommGroup W] [Module ℂ W] (e : V ≃ₗ[ℂ] W) (ρ : Representation ℂ G V)
+    (h : Representation.IsIrreducible ρ) : Representation.IsIrreducible (conjRep e ρ) :=
+  (OrderIso.isSimpleOrder_iff (subrepConjOrderIso e ρ)).mpr h
+
+omit [Fintype G] in
+/-- Conjugation by a linear isometry equivalence preserves unitarity. NOTE:
+declared and proved here for the record (R-2); `hopc_of_hop` inlines the same
+argument instead of applying this lemma, because applying a normed-context
+lemma to `irreducibleRep c` hits the instance-path elaboration pathology
+(RECord: the whnf timeout at this exact application). -/
+lemma conjRep_isUnitary {V : Type*} [NormedAddCommGroup V] [InnerProductSpace ℂ V]
+    {W : Type*} [NormedAddCommGroup W] [InnerProductSpace ℂ W]
+    (ρ : Representation ℂ G V) (e : V ≃ₗᵢ[ℂ] W) (hρ : IsUnitary ρ) :
+    IsUnitary (conjRep e.toLinearEquiv ρ) := by
+  intro g x y
+  show inner ℂ (conjRep e.toLinearEquiv ρ g x) (conjRep e.toLinearEquiv ρ g y) = inner ℂ x y
+  rw [conjRep_apply, conjRep_apply]
+  have he : ∀ u v : V, inner ℂ (e.toLinearEquiv u) (e.toLinearEquiv v) = inner ℂ u v :=
+    fun u v => LinearIsometryEquiv.inner_map_map e u v
+  rw [he, hρ g]
+  have h2 := he ((e.toLinearEquiv).symm x) ((e.toLinearEquiv).symm y)
+  rw [LinearEquiv.apply_symm_apply, LinearEquiv.apply_symm_apply] at h2
+  exact h2.symm
+
+/-- Conjugation by an isometry shrinks the operator norm by at most one. -/
+lemma opNorm_conj_le {V : Type*} [NormedAddCommGroup V] [InnerProductSpace ℂ V]
+    [FiniteDimensional ℂ V] {W : Type*} [NormedAddCommGroup W] [InnerProductSpace ℂ W]
+    [FiniteDimensional ℂ W] (X : Module.End ℂ V) (e : V ≃ₗᵢ[ℂ] W) :
+    ‖LinearMap.toContinuousLinearMap (e.toLinearEquiv.conj X)‖ ≤
+      ‖LinearMap.toContinuousLinearMap X‖ := by
+  have hE : LinearMap.toContinuousLinearMap (e.toLinearEquiv.conj X) =
+      (LinearMap.toContinuousLinearMap e.toLinearEquiv.toLinearMap).comp
+        ((LinearMap.toContinuousLinearMap X).comp
+          (LinearMap.toContinuousLinearMap (e.toLinearEquiv).symm.toLinearMap)) := by
+    ext w
+    simp only [ContinuousLinearMap.comp_apply]
+    rfl
+  have he1 : ‖LinearMap.toContinuousLinearMap e.toLinearEquiv.toLinearMap‖ ≤ 1 := by
+    apply ContinuousLinearMap.opNorm_le_bound _ (by norm_num)
+    intro x
+    calc ‖(LinearMap.toContinuousLinearMap e.toLinearEquiv.toLinearMap) x‖
+        = ‖e x‖ := rfl
+      _ = ‖x‖ := e.toLinearIsometry.norm_map x
+      _ ≤ 1 * ‖x‖ := by rw [one_mul]
+  have hs1 : ‖LinearMap.toContinuousLinearMap (e.toLinearEquiv).symm.toLinearMap‖ ≤ 1 := by
+    apply ContinuousLinearMap.opNorm_le_bound _ (by norm_num)
+    intro w
+    calc ‖(LinearMap.toContinuousLinearMap (e.toLinearEquiv).symm.toLinearMap) w‖
+        = ‖e.symm w‖ := rfl
+      _ = ‖w‖ := e.symm.toLinearIsometry.norm_map w
+      _ ≤ 1 * ‖w‖ := by rw [one_mul]
+  rw [hE]
+  calc ‖_‖ ≤ ‖LinearMap.toContinuousLinearMap e.toLinearEquiv.toLinearMap‖ *
+        ‖(LinearMap.toContinuousLinearMap X).comp
+          (LinearMap.toContinuousLinearMap (e.toLinearEquiv).symm.toLinearMap)‖ :=
+        ContinuousLinearMap.opNorm_comp_le _ _
+    _ ≤ ‖LinearMap.toContinuousLinearMap e.toLinearEquiv.toLinearMap‖ *
+        (‖LinearMap.toContinuousLinearMap X‖ *
+          ‖LinearMap.toContinuousLinearMap (e.toLinearEquiv).symm.toLinearMap‖) :=
+        mul_le_mul_of_nonneg_left (ContinuousLinearMap.opNorm_comp_le _ _) (norm_nonneg _)
+    _ ≤ 1 * (‖LinearMap.toContinuousLinearMap X‖ * 1) := by
+        apply mul_le_mul (he1)
+        · exact mul_le_mul_of_nonneg_left hs1 (norm_nonneg _)
+        · positivity
+        · norm_num
+    _ = ‖LinearMap.toContinuousLinearMap X‖ := by rw [one_mul, mul_one]
+
+/-- Conjugating twice by inverse equivalences returns the endomorphism. -/
+lemma conj_conj_symm {V : Type*} [AddCommGroup V] [Module ℂ V] {W : Type*}
+    [AddCommGroup W] [Module ℂ W] (E : V ≃ₗ[ℂ] W) (X : Module.End ℂ V) :
+    E.symm.conj (E.conj X) = X := by
+  ext v
+  simp only [LinearEquiv.conj_apply_apply, LinearEquiv.symm_symm,
+    LinearEquiv.symm_apply_apply]
+
+/-- Conjugation by an isometry preserves the operator norm. -/
+lemma opNorm_conj {V : Type*} [NormedAddCommGroup V] [InnerProductSpace ℂ V]
+    [FiniteDimensional ℂ V] {W : Type*} [NormedAddCommGroup W] [InnerProductSpace ℂ W]
+    [FiniteDimensional ℂ W] (X : Module.End ℂ V) (e : V ≃ₗᵢ[ℂ] W) :
+    ‖LinearMap.toContinuousLinearMap (e.toLinearEquiv.conj X)‖ =
+      ‖LinearMap.toContinuousLinearMap X‖ := by
+  apply le_antisymm (opNorm_conj_le X e)
+  have hE2 : e.symm.toLinearEquiv = (e.toLinearEquiv).symm := by
+    ext w
+    rfl
+  have h2 := opNorm_conj_le (e.toLinearEquiv.conj X) e.symm
+  rw [hE2, conj_conj_symm] at h2
+  exact h2
+
+/-- Conjugation by an isometry preserves the Hilbert–Schmidt norm squared. -/
+lemma hsNormSq_conj {V : Type*} [NormedAddCommGroup V] [InnerProductSpace ℂ V]
+    [FiniteDimensional ℂ V] (X : Module.End ℂ V)
+    {W : Type*} [NormedAddCommGroup W] [InnerProductSpace ℂ W] [FiniteDimensional ℂ W]
+    (e : V ≃ₗᵢ[ℂ] W) :
+    hsNormSq (e.toLinearEquiv.conj X) = hsNormSq X := by
+  let b := stdOrthonormalBasis ℂ V
+  rw [hsNormSq_eq_sum (b.map e), hsNormSq_eq_sum b]
+  apply Finset.sum_congr rfl
+  intro i _
+  rw [OrthonormalBasis.map_apply]
+  have hsym : ∀ x : V, (e.toLinearEquiv).symm (e x) = x :=
+    fun x => LinearIsometryEquiv.symm_apply_apply e x
+  rw [LinearEquiv.conj_apply_apply, hsym]
+  have hn : ∀ y : V, ‖e.toLinearEquiv y‖ = ‖y‖ := fun y => e.toLinearIsometry.norm_map y
+  rw [hn]
+
+universe u
+
+/-- The operator-norm bound at `irreducibleRep c`, obtained by transporting
+the representation to the clean carrier `EuclideanSpace ℂ (ULift (Fin d))`,
+consuming the hypothesis there (fast: probe Q13), and transporting the bound
+back through the conjugation invariances above. Direct consumption at the
+subtype carrier does not elaborate (probes P0/P0b/Q8, whnf/isDefEq timeouts).
+
+Universe note: `hop` here quantifies over `V : Type u` with `u` the lemma's
+own universe parameter — when this lemma is applied to the challenge's
+hypothesis (universe `u_1` of the theorem under proof), `u := u_1`, and the
+transport carrier lives in `Type u₁` as required. -/
+lemma hopc_of_hop {A β : ℝ} {f : (n : ℕ) → Equiv.Perm (Fin n) → ℝ}
+    (hop : ∀ n, ∀ (V : Type u) [NormedAddCommGroup V] [InnerProductSpace ℂ V]
+        [FiniteDimensional ℂ V] (ρ : Representation ℂ (Equiv.Perm (Fin n)) V),
+        Representation.IsIrreducible ρ → IsUnitary ρ → 1 < Module.finrank ℂ V →
+          ‖LinearMap.toContinuousLinearMap (complexFourier ρ (fun g => (f n g : ℂ)))‖
+            ≤ A * (Module.finrank ℂ V : ℝ) ^ (-β))
+    (n : ℕ) (c : IrreducibleIndex (Equiv.Perm (Fin n))) (hc : 1 < irreducibleDegree c) :
+    ‖LinearMap.toContinuousLinearMap (complexFourier (V := irreducibleSpace c)
+        (irreducibleRep c) (fun g => (f n g : ℂ)))‖
+      ≤ A * (irreducibleDegree c : ℝ) ^ (-β) := by
+  classical
+  have hfr : Module.finrank ℂ ↥(irreducibleSpace c) = irreducibleDegree c := rfl
+  let e : ↥(irreducibleSpace c) ≃ₗᵢ[ℂ]
+      EuclideanSpace ℂ (ULift.{u} (Fin (irreducibleDegree c))) :=
+    (stdOrthonormalBasis ℂ ↥(irreducibleSpace c)).repr.trans
+      (LinearIsometryEquiv.piLpCongrLeft 2 ℂ ℂ
+        ((Equiv.cast (congrArg Fin hfr)).trans (Equiv.ulift.{u, 0}.symm)))
+  have hfinW : Module.finrank ℂ (EuclideanSpace ℂ (ULift.{u} (Fin (irreducibleDegree c)))) =
+      irreducibleDegree c := by
+    rw [← hfr]
+    exact e.toLinearEquiv.finrank_eq.symm
+  have hρ'U : IsUnitary (conjRep e.toLinearEquiv (irreducibleRep c)) := by
+    intro g x y
+    rw [conjRep_apply, conjRep_apply]
+    -- normalize the coercions: ⇑e.toLinearEquiv → ⇑e, ⇑(e.toLinearEquiv).symm → ⇑e.symm
+    have hsymm : ∀ w : EuclideanSpace ℂ (ULift.{u} (Fin (irreducibleDegree c))),
+        (e.toLinearEquiv).symm w = e.symm w := fun w => rfl
+    rw [LinearIsometryEquiv.coe_toLinearEquiv, hsymm, hsymm]
+    -- e preserves inner — via polarization (norms only; the LIE-slot
+    -- application of `inner_map_map` does not elaborate on this carrier)
+    have he : ∀ A B : ↥(irreducibleSpace c), inner ℂ (e A) (e B) = inner ℂ A B := by
+      intro A B
+      rw [Submodule.coe_inner]
+      rw [inner_eq_sum_norm_sq_div_four, inner_eq_sum_norm_sq_div_four]
+      have he_norm : ∀ w : ↥(irreducibleSpace c), ‖e w‖ = ‖w‖ :=
+        fun w => e.toLinearIsometry.norm_map w
+      simp only [← map_add, ← map_sub, ← map_smul, he_norm, ← Submodule.coe_add,
+        ← Submodule.coe_sub, ← Submodule.coe_smul, Submodule.norm_coe]
+    rw [he]
+    -- now: inner (ρc g (e.symm x)) (ρc g (e.symm y)) = inner x y — ρc is unitary
+    rw [irreducibleRep_unitary c g]
+    -- now: inner (e.symm x)(e.symm y) = inner x y — same polarization chain on e.symm
+    have heS : ∀ u v : EuclideanSpace ℂ (ULift.{u} (Fin (irreducibleDegree c))),
+        inner ℂ (e.symm u) (e.symm v) = inner ℂ u v := by
+      intro u v
+      rw [Submodule.coe_inner]
+      rw [inner_eq_sum_norm_sq_div_four, inner_eq_sum_norm_sq_div_four]
+      have heS_norm : ∀ w : EuclideanSpace ℂ (ULift.{u} (Fin (irreducibleDegree c))),
+          ‖e.symm w‖ = ‖w‖ := fun w => e.symm.toLinearIsometry.norm_map w
+      simp only [← map_add, ← map_sub, ← map_smul, heS_norm, ← Submodule.coe_add,
+        ← Submodule.coe_sub, ← Submodule.coe_smul, Submodule.norm_coe]
+    exact heS x y
+  have hb := hop n (EuclideanSpace ℂ (ULift.{u} (Fin (irreducibleDegree c))))
+    (conjRep e.toLinearEquiv (irreducibleRep c))
+    (conjRep_isIrreducible e.toLinearEquiv (irreducibleRep c) inferInstance)
+    hρ'U
+    (by rw [hfinW]; exact hc)
+  rw [hfinW] at hb
+  rw [complexFourier_conjRep e.toLinearEquiv (irreducibleRep c), opNorm_conj] at hb
+  exact hb
+
+end PresentationTransport
+
+/-! ## Slice 4b: assembly of Proposition 2.5 (operator and Hilbert–Schmidt forms)
+
+The convergence exit: `totalVariation (μ^{*r}) U ≤ (1 − mass f^{*r})/2 +
+totalVariation (f^{*r}) U`, the second term squared-controlled by
+`deficit_plancherel` + the energy split of slice 3c, and the energy pieces
+tend to zero (sign-mean squeeze, the degree-sum bridge of slice 3c, and
+`hopc_of_hop`/`hopcHs_of_hhs` for the transported hypothesis). -/
+
+section Assembly
+
+open Filter
+
+/-- Mass of a convolution is the product of the masses. -/
+lemma mass_convolution {G : Type*} [Group G] [Fintype G] (p q : G → ℝ) :
+    mass (BinaryCoordinateSweeps.convolution p q) = mass p * mass q := by
+  show (∑ g, ∑ x, p x * q (x⁻¹ * g)) = (∑ x, p x) * ∑ x, q x
+  rw [Finset.sum_comm, Finset.sum_mul]
+  apply Finset.sum_congr rfl
+  intro x _
+  rw [← Finset.mul_sum]
+  apply congrArg (p x * ·)
+  exact Equiv.sum_comp (Equiv.mulLeft x⁻¹) (fun g' => q g')
+
+/-- Mass of the empty convolution power (the point mass at 1). -/
+lemma mass_pointMassOne {G : Type*} [Group G] [Fintype G] :
+    mass (BinaryCoordinateSweeps.pointMassOne (G := G)) = 1 := by
+  classical
+  show (∑ g, BinaryCoordinateSweeps.pointMassOne (G := G) g) = 1
+  simp only [BinaryCoordinateSweeps.pointMassOne]
+  rw [Finset.sum_ite_eq']
+  simp
+
+/-- Mass of a convolution power is the power of the mass. -/
+lemma mass_convolutionPower {G : Type*} [Group G] [Fintype G] (p : G → ℝ) (r : ℕ) :
+    mass (BinaryCoordinateSweeps.convolutionPower p r) = mass p ^ r := by
+  induction r with
+  | zero =>
+    show mass BinaryCoordinateSweeps.pointMassOne = 1
+    exact mass_pointMassOne
+  | succ k ih =>
+    show mass (BinaryCoordinateSweeps.convolution p
+        (BinaryCoordinateSweeps.convolutionPower p k)) = mass p ^ (k + 1)
+    rw [mass_convolution, ih, pow_succ, mul_comm]
+
+/-- Convolution of nonnegative functions is nonnegative. -/
+lemma convolution_nonneg {G : Type*} [Group G] [Fintype G] {p q : G → ℝ}
+    (hp : ∀ g, 0 ≤ p g) (hq : ∀ g, 0 ≤ q g) :
+    ∀ g, 0 ≤ BinaryCoordinateSweeps.convolution p q g :=
+  fun _ => Finset.sum_nonneg (fun x _ => mul_nonneg (hp x) (hq _))
+
+/-- Convolution powers of a nonnegative function are nonnegative. -/
+lemma convolutionPower_nonneg {G : Type*} [Group G] [Fintype G] {p : G → ℝ}
+    (hp : ∀ g, 0 ≤ p g) (r : ℕ) : ∀ g, 0 ≤ BinaryCoordinateSweeps.convolutionPower p r g := by
+  induction r with
+  | zero =>
+    intro g
+    show 0 ≤ BinaryCoordinateSweeps.pointMassOne g
+    unfold BinaryCoordinateSweeps.pointMassOne
+    split_ifs <;> norm_num
+  | succ k ih =>
+    intro g
+    show 0 ≤ BinaryCoordinateSweeps.convolution p (BinaryCoordinateSweeps.convolutionPower p k) g
+    exact convolution_nonneg hp ih g
+
+/-- Convolution is monotone in both arguments for nonnegative functions. -/
+lemma convolution_le_convolution {G : Type*} [Group G] [Fintype G] {p₁ p₂ q₁ q₂ : G → ℝ}
+    (h1 : ∀ g, p₁ g ≤ p₂ g) (h2 : ∀ g, q₁ g ≤ q₂ g)
+    (hp : ∀ g, 0 ≤ p₁ g) (hq : ∀ g, 0 ≤ q₁ g) :
+    ∀ g, BinaryCoordinateSweeps.convolution p₁ q₁ g ≤
+      BinaryCoordinateSweeps.convolution p₂ q₂ g := by
+  intro g
+  apply Finset.sum_le_sum
+  intro x _
+  exact mul_le_mul (h1 x) (h2 _) (hq _) ((hp x).trans (h1 x))
+
+/-- Convolution powers inherit pointwise domination. -/
+lemma convolutionPower_le {G : Type*} [Group G] [Fintype G] {p q : G → ℝ}
+    (hp : ∀ g, 0 ≤ p g) (h : ∀ g, p g ≤ q g) (r : ℕ) :
+    ∀ g, BinaryCoordinateSweeps.convolutionPower p r g ≤
+      BinaryCoordinateSweeps.convolutionPower q r g := by
+  induction r with
+  | zero => intro g; exact le_refl _
+  | succ k ih =>
+    intro g
+    show BinaryCoordinateSweeps.convolution p (BinaryCoordinateSweeps.convolutionPower p k) g ≤
+      BinaryCoordinateSweeps.convolution q (BinaryCoordinateSweeps.convolutionPower q k) g
+    exact convolution_le_convolution h ih hp (convolutionPower_nonneg hp k) g
+
+/-- `realSign` takes values in `{±1}`, so its absolute value is 1. -/
+lemma abs_realSign {n : ℕ} (g : Equiv.Perm (Fin n)) :
+    |BinaryCoordinateSweeps.realSign g| = 1 := by
+  have h : (BinaryCoordinateSweeps.realSign g)^2 = 1 := by
+    have hc : YoungTabloid.signC g * YoungTabloid.signC g = 1 := YoungTabloid.signC_sq g
+    rw [signC_eq_realSign, ← Complex.ofReal_mul] at hc
+    rw [pow_two]
+    exact Complex.ofReal_inj.mp (hc.trans Complex.ofReal_one.symm)
+  rw [sq_eq_one_iff] at h
+  rcases h with h | h <;> rw [h] <;> norm_num
+
+/-- The sign mean of the subprobability is squeezed to zero by the ambient
+sign mean and the mass convergence: `signMean f = signMean μ − mass((μ−f)·s)`
+where the second term is bounded by `1 − mass f`. -/
+lemma signMean_tendsto_zero {μ f : (n : ℕ) → Equiv.Perm (Fin n) → ℝ}
+    (hμ : ∀ n, (∀ g, 0 ≤ μ n g) ∧ mass (μ n) = 1)
+    (hf : ∀ n, (∀ g, 0 ≤ f n g) ∧ ∀ g, f n g ≤ μ n g)
+    (hmass : Tendsto (fun n => mass (f n)) atTop (nhds 1))
+    (hsign : Tendsto (fun n => mass (fun g => μ n g * BinaryCoordinateSweeps.realSign g))
+      atTop (nhds 0)) :
+    Tendsto (fun n => mass (fun g => f n g * BinaryCoordinateSweeps.realSign g))
+      atTop (nhds 0) := by
+  have hdecomp : ∀ n, mass (fun g => f n g * BinaryCoordinateSweeps.realSign g) =
+      mass (fun g => μ n g * BinaryCoordinateSweeps.realSign g) -
+        mass (fun g => (μ n g - f n g) * BinaryCoordinateSweeps.realSign g) := by
+    intro n
+    show (∑ g, f n g * BinaryCoordinateSweeps.realSign g) =
+      (∑ g, μ n g * BinaryCoordinateSweeps.realSign g) -
+        ∑ g, (μ n g - f n g) * BinaryCoordinateSweeps.realSign g
+    rw [← Finset.sum_sub_distrib]
+    apply Finset.sum_congr rfl
+    intro g _
+    ring
+  have hbound : ∀ n, |mass (fun g => (μ n g - f n g) * BinaryCoordinateSweeps.realSign g)| ≤
+      1 - mass (f n) := by
+    intro n
+    calc |∑ g, (μ n g - f n g) * BinaryCoordinateSweeps.realSign g|
+        ≤ ∑ g, |(μ n g - f n g) * BinaryCoordinateSweeps.realSign g| :=
+          Finset.abs_sum_le_sum_abs _ _
+      _ = ∑ g, (μ n g - f n g) := by
+          apply Finset.sum_congr rfl
+          intro g _
+          rw [abs_mul, abs_realSign, mul_one]
+          exact abs_of_nonneg (sub_nonneg.mpr ((hf n).2 g))
+      _ = mass (μ n) - mass (f n) := by
+          show (∑ g, (μ n g - f n g)) = (∑ g, μ n g) - ∑ g, f n g
+          rw [← Finset.sum_sub_distrib]
+      _ = 1 - mass (f n) := by rw [(hμ n).2]
+  have hdiff0 : Tendsto (fun n => mass (fun g => (μ n g - f n g) *
+      BinaryCoordinateSweeps.realSign g)) atTop (nhds 0) := by
+    have hU : Tendsto (fun n => 1 - mass (f n)) atTop (nhds 0) := by
+      have h := (tendsto_const_nhds (x := (1 : ℝ))).sub hmass
+      simpa using h
+    have hL : Tendsto (fun n => -(1 - mass (f n))) atTop (nhds 0) := by
+      have h := hU.neg
+      simpa using h
+    apply tendsto_of_tendsto_of_tendsto_of_le_of_le hL hU
+    · intro n; exact (abs_le.mp (hbound n)).1
+    · intro n; exact (abs_le.mp (hbound n)).2
+  have hlim := hsign.sub hdiff0
+  have hlim' : Tendsto (fun n => mass (fun g => f n g * BinaryCoordinateSweeps.realSign g))
+      atTop (nhds (0 - 0)) := hlim.congr' (Eventually.of_forall fun n => (hdecomp n).symm)
+  simpa using hlim'
+
+end Assembly
+
+/-! ## Slice 4b (cont.): the convergence exit and Prop 2.5, operator form -/
+
+section AssemblyProp
+
+open Filter
+
+/-- Total variation is nonnegative. -/
+lemma tv_nonneg {G : Type*} [Fintype G] (p q : G → ℝ) :
+    0 ≤ BinaryCoordinateSweeps.totalVariation p q := by
+  unfold BinaryCoordinateSweeps.totalVariation
+  exact mul_nonneg (by positivity) (Finset.sum_nonneg (fun _ _ => abs_nonneg _))
+
+/-- The total-variation split: `TV(μ^{*r}, U) ≤ (1 − mass f^{*r})/2 + TV(f^{*r}, U)`. -/
+lemma tv_split_subprob {n : ℕ} {μ f : Equiv.Perm (Fin n) → ℝ}
+    (_hμ_nonneg : ∀ g, 0 ≤ μ g) (hμ_mass : mass μ = 1)
+    (hf_nonneg : ∀ g, 0 ≤ f g) (hf_le : ∀ g, f g ≤ μ g) (r : ℕ) :
+    BinaryCoordinateSweeps.totalVariation (BinaryCoordinateSweeps.convolutionPower μ r)
+        (BinaryCoordinateSweeps.uniformLaw (Equiv.Perm (Fin n))) ≤
+      (1 - mass (BinaryCoordinateSweeps.convolutionPower f r)) / 2 +
+        BinaryCoordinateSweeps.totalVariation (BinaryCoordinateSweeps.convolutionPower f r)
+          (BinaryCoordinateSweeps.uniformLaw (Equiv.Perm (Fin n))) := by
+  classical
+  unfold BinaryCoordinateSweeps.totalVariation
+  have hmass : (1 - mass (BinaryCoordinateSweeps.convolutionPower f r)) / 2 =
+      (1/((2:ℕ):ℝ)) * ∑ g, (BinaryCoordinateSweeps.convolutionPower μ r g -
+        BinaryCoordinateSweeps.convolutionPower f r g) := by
+    have h1 : ∑ g, (BinaryCoordinateSweeps.convolutionPower μ r g -
+        BinaryCoordinateSweeps.convolutionPower f r g) =
+        (∑ g, BinaryCoordinateSweeps.convolutionPower μ r g) -
+          (∑ g, BinaryCoordinateSweeps.convolutionPower f r g) :=
+      Finset.sum_sub_distrib _ _
+    rw [h1]
+    rw [show (∑ g, BinaryCoordinateSweeps.convolutionPower μ r g) =
+        mass (BinaryCoordinateSweeps.convolutionPower μ r) from rfl,
+      show (∑ g, BinaryCoordinateSweeps.convolutionPower f r g) =
+        mass (BinaryCoordinateSweeps.convolutionPower f r) from rfl,
+      mass_convolutionPower, mass_convolutionPower, hμ_mass, one_pow]
+    push_cast
+    ring
+  rw [hmass, ← mul_add]
+  apply mul_le_mul_of_nonneg_left _ (by positivity : (0:ℝ) ≤ 1/((2:ℕ):ℝ))
+  rw [← Finset.sum_add_distrib]
+  apply Finset.sum_le_sum
+  intro g _
+  have hle : BinaryCoordinateSweeps.convolutionPower f r g ≤
+      BinaryCoordinateSweeps.convolutionPower μ r g :=
+    convolutionPower_le hf_nonneg hf_le r g
+  calc |BinaryCoordinateSweeps.convolutionPower μ r g -
+        BinaryCoordinateSweeps.uniformLaw (Equiv.Perm (Fin n)) g|
+      = |(BinaryCoordinateSweeps.convolutionPower μ r g -
+          BinaryCoordinateSweeps.convolutionPower f r g) +
+        (BinaryCoordinateSweeps.convolutionPower f r g -
+          BinaryCoordinateSweeps.uniformLaw (Equiv.Perm (Fin n)) g)| :=
+        congrArg _ (by ring)
+    _ ≤ |BinaryCoordinateSweeps.convolutionPower μ r g -
+          BinaryCoordinateSweeps.convolutionPower f r g| +
+        |BinaryCoordinateSweeps.convolutionPower f r g -
+          BinaryCoordinateSweeps.uniformLaw (Equiv.Perm (Fin n)) g| := by
+        have h := norm_add_le (BinaryCoordinateSweeps.convolutionPower μ r g -
+          BinaryCoordinateSweeps.convolutionPower f r g)
+          (BinaryCoordinateSweeps.convolutionPower f r g -
+            BinaryCoordinateSweeps.uniformLaw (Equiv.Perm (Fin n)) g)
+        rwa [Real.norm_eq_abs, Real.norm_eq_abs, Real.norm_eq_abs] at h
+    _ = (BinaryCoordinateSweeps.convolutionPower μ r g -
+          BinaryCoordinateSweeps.convolutionPower f r g) +
+        |BinaryCoordinateSweeps.convolutionPower f r g -
+          BinaryCoordinateSweeps.uniformLaw (Equiv.Perm (Fin n)) g| := by
+        rw [abs_of_nonneg (sub_nonneg.mpr hle)]
+
+/-- `(2·TV(f,U))² ≤ (1 − mass f)² + nontrivialEnergy f`. -/
+lemma tv_deficit_sq {n : ℕ} (f : Equiv.Perm (Fin n) → ℝ) :
+    (2 * BinaryCoordinateSweeps.totalVariation f
+        (BinaryCoordinateSweeps.uniformLaw (Equiv.Perm (Fin n))))^2 ≤
+      (1 - mass f)^2 + nontrivialEnergy f := by
+  have h := deficit_plancherel f
+  have h2 : 2 * BinaryCoordinateSweeps.totalVariation f
+      (BinaryCoordinateSweeps.uniformLaw (Equiv.Perm (Fin n))) =
+      ∑ g, |f g - 1 / Fintype.card (Equiv.Perm (Fin n))| := by
+    unfold BinaryCoordinateSweeps.totalVariation BinaryCoordinateSweeps.uniformLaw
+    rw [← mul_assoc]
+    rw [show (2:ℝ) * (1/((2:ℕ):ℝ)) = 1 from by push_cast; norm_num]
+    rw [one_mul]
+    apply Finset.sum_congr rfl
+    intro g _
+    rw [one_div]
+  rw [h2]
+  exact h
+
+/-- The energy of the subprobability's `r`-th convolution power tends to zero
+(operator form): the sign term via the squeeze, the degree-`>1` terms via the
+transported operator bound and the degree-sum bridge. -/
+lemma operator_energy_tendsto_zero {A β : ℝ} (hA : 0 < A) (_hβ : 0 < β) (r : ℕ)
+    (hr : (2:ℝ) - 2 * (r:ℝ) * β < 0)
+    {μ f : (n : ℕ) → Equiv.Perm (Fin n) → ℝ}
+    (hμ : ∀ n, (∀ g, 0 ≤ μ n g) ∧ mass (μ n) = 1)
+    (hf : ∀ n, (∀ g, 0 ≤ f n g) ∧ ∀ g, f n g ≤ μ n g)
+    (hmass : Tendsto (fun n => mass (f n)) atTop (nhds 1))
+    (hsign : Tendsto (fun n => mass (fun g => μ n g * BinaryCoordinateSweeps.realSign g))
+      atTop (nhds 0))
+    (hop : ∀ n, ∀ (V : Type u) [NormedAddCommGroup V] [InnerProductSpace ℂ V]
+        [FiniteDimensional ℂ V] (ρ : Representation ℂ (Equiv.Perm (Fin n)) V),
+        Representation.IsIrreducible ρ → IsUnitary ρ → 1 < Module.finrank ℂ V →
+          ‖LinearMap.toContinuousLinearMap (complexFourier ρ (fun g => (f n g : ℂ)))‖
+            ≤ A * (Module.finrank ℂ V : ℝ) ^ (-β)) :
+    Tendsto (fun n => nontrivialEnergy (BinaryCoordinateSweeps.convolutionPower (f n) r))
+      atTop (nhds 0) := by
+  classical
+  have hr1 : 1 ≤ r := by
+    by_contra h
+    rw [not_le] at h
+    obtain rfl := Nat.lt_one_iff.mp h
+    norm_num at hr
+  have hsignf := signMean_tendsto_zero hμ hf hmass hsign
+  have hp1 : Tendsto (fun n => (mass (fun g => f n g *
+      BinaryCoordinateSweeps.realSign g))^(2*r)) atTop (nhds 0) := by
+    have h := hsignf.pow (2*r)
+    rwa [zero_pow (by omega : 2*r ≠ 0)] at h
+  have hp2 : Tendsto (fun n => A^(2*r) * ∑ c : IrreducibleIndex (Equiv.Perm (Fin n)),
+      if 1 < irreducibleDegree c then (irreducibleDegree c : ℝ)^(2 - 2*(r:ℝ)*β) else 0)
+      atTop (nhds 0) := by
+    have hexp : (2:ℝ) - 2*(r:ℝ)*β = -((2:ℝ)*(r:ℝ)*β - 2) := by ring
+    have hs : 0 < (2:ℝ)*(r:ℝ)*β - 2 := by linarith
+    have hbridge := degreeSum_tendsto_zero ((2:ℝ)*(r:ℝ)*β - 2) hs
+    have hEq : (fun n => A^(2*r) * ∑ c : IrreducibleIndex (Equiv.Perm (Fin n)),
+        if 1 < irreducibleDegree c then (irreducibleDegree c : ℝ)^(2 - 2*(r:ℝ)*β) else 0) =
+        (fun n => A^(2*r) * ∑ c : IrreducibleIndex (Equiv.Perm (Fin n)),
+        if 1 < irreducibleDegree c then (irreducibleDegree c : ℝ)^(-((2:ℝ)*(r:ℝ)*β - 2))
+          else 0) := by
+      funext n
+      apply congrArg (A^(2*r) * ·)
+      apply Finset.sum_congr rfl
+      intro c _
+      rw [hexp]
+    rw [hEq]
+    have h := hbridge.const_mul (A^(2*r))
+    rwa [mul_zero] at h
+  have hlim : Tendsto (fun n => (mass (fun g => f n g * BinaryCoordinateSweeps.realSign g))^(2*r) +
+      A^(2*r) * ∑ c : IrreducibleIndex (Equiv.Perm (Fin n)),
+        if 1 < irreducibleDegree c then (irreducibleDegree c : ℝ)^(2 - 2*(r:ℝ)*β) else 0)
+      atTop (nhds 0) := by
+    have h := hp1.add hp2
+    simpa using h
+  have hnn : ∀ n, 0 ≤ nontrivialEnergy (BinaryCoordinateSweeps.convolutionPower (f n) r) := by
+    intro n
+    unfold nontrivialEnergy
+    apply Finset.sum_nonneg
+    intro c _
+    exact mul_nonneg (Nat.cast_nonneg _) (hsNormSq_nonneg _)
+  have hle : ∀ᶠ n in atTop, nontrivialEnergy (BinaryCoordinateSweeps.convolutionPower (f n) r) ≤
+      (mass (fun g => f n g * BinaryCoordinateSweeps.realSign g))^(2*r) +
+        A^(2*r) * ∑ c : IrreducibleIndex (Equiv.Perm (Fin n)),
+          if 1 < irreducibleDegree c then (irreducibleDegree c : ℝ)^(2 - 2*(r:ℝ)*β) else 0 := by
+    filter_upwards [eventually_ge_atTop 2] with n hn
+    exact nontrivialEnergy_convPower_le hn hA r (f n) (fun c hc => hopc_of_hop hop n c hc)
+  exact squeeze_zero' (Eventually.of_forall hnn) hle hlim
+
+/-- Proposition 2.5, operator-norm form: a uniform power saving of the
+Fourier transform at every irreducible of degree > 1 amplifies to
+total-variation convergence after `r` convolutions whenever `2 − 2rβ < 0`. -/
+theorem fourier_amplification_operator
+    (A β : ℝ) (hA : 0 < A) (hβ : 0 < β) (r : ℕ)
+    (hr : (2 : ℝ) - 2 * (r : ℝ) * β < 0)
+    (μ f : (n : ℕ) → Equiv.Perm (Fin n) → ℝ)
+    (hμ : ∀ n, (∀ g, 0 ≤ μ n g) ∧ mass (μ n) = 1)
+    (hf : ∀ n, (∀ g, 0 ≤ f n g) ∧ ∀ g, f n g ≤ μ n g)
+    (hmass : Tendsto (fun n => mass (f n)) atTop (nhds 1))
+    (hsign : Tendsto (fun n => mass (fun g => μ n g *
+      BinaryCoordinateSweeps.realSign g)) atTop (nhds 0))
+    (hop : ∀ n, ∀ (V : Type u) [NormedAddCommGroup V] [InnerProductSpace ℂ V]
+        [FiniteDimensional ℂ V] (ρ : Representation ℂ (Equiv.Perm (Fin n)) V),
+        Representation.IsIrreducible ρ → IsUnitary ρ → 1 < Module.finrank ℂ V →
+          ‖LinearMap.toContinuousLinearMap (complexFourier ρ (fun g => (f n g : ℂ)))‖
+            ≤ A * (Module.finrank ℂ V : ℝ) ^ (-β)) :
+    Tendsto (fun n => BinaryCoordinateSweeps.totalVariation
+        (BinaryCoordinateSweeps.convolutionPower (μ n) r)
+        (BinaryCoordinateSweeps.uniformLaw (Equiv.Perm (Fin n))))
+      atTop (nhds 0) := by
+  classical
+  have hm1 : Tendsto (fun n => mass (BinaryCoordinateSweeps.convolutionPower (f n) r))
+      atTop (nhds 1) := by
+    have h1 : Tendsto (fun n => mass (f n)^r) atTop (nhds (1^r)) := hmass.pow r
+    have h2 : (fun n => mass (BinaryCoordinateSweeps.convolutionPower (f n) r)) =
+        (fun n => mass (f n)^r) := funext fun n => mass_convolutionPower _ _
+    rw [h2]
+    simpa using h1
+  have hpiece1 : Tendsto (fun n =>
+      (1 - mass (BinaryCoordinateSweeps.convolutionPower (f n) r))/2) atTop (nhds 0) := by
+    have h := ((tendsto_const_nhds (x := (1:ℝ))).sub hm1).div_const 2
+    simpa using h
+  have hpiece2 : Tendsto (fun n => BinaryCoordinateSweeps.totalVariation
+      (BinaryCoordinateSweeps.convolutionPower (f n) r)
+      (BinaryCoordinateSweeps.uniformLaw (Equiv.Perm (Fin n)))) atTop (nhds 0) := by
+    have hR : Tendsto (fun n => (1 - mass (BinaryCoordinateSweeps.convolutionPower (f n) r))^2 +
+        nontrivialEnergy (BinaryCoordinateSweeps.convolutionPower (f n) r)) atTop (nhds 0) := by
+      have h1 : Tendsto (fun n => (1 - mass (BinaryCoordinateSweeps.convolutionPower (f n) r))^2)
+          atTop (nhds ((1-1)^2)) := ((tendsto_const_nhds (x := (1:ℝ))).sub hm1).pow 2
+      have h2 := operator_energy_tendsto_zero hA hβ r hr hμ hf hmass hsign hop
+      have h3 := h1.add h2
+      simpa using h3
+    have hbound : ∀ n, BinaryCoordinateSweeps.totalVariation
+        (BinaryCoordinateSweeps.convolutionPower (f n) r)
+        (BinaryCoordinateSweeps.uniformLaw (Equiv.Perm (Fin n))) ≤
+        Real.sqrt ((1 - mass (BinaryCoordinateSweeps.convolutionPower (f n) r))^2 +
+          nontrivialEnergy (BinaryCoordinateSweeps.convolutionPower (f n) r)) / 2 := by
+      intro n
+      have hdef := tv_deficit_sq (BinaryCoordinateSweeps.convolutionPower (f n) r)
+      have hnn := tv_nonneg (BinaryCoordinateSweeps.convolutionPower (f n) r)
+        (BinaryCoordinateSweeps.uniformLaw (Equiv.Perm (Fin n)))
+      have h2 : 2 * BinaryCoordinateSweeps.totalVariation
+          (BinaryCoordinateSweeps.convolutionPower (f n) r)
+          (BinaryCoordinateSweeps.uniformLaw (Equiv.Perm (Fin n))) ≤
+          Real.sqrt ((1 - mass (BinaryCoordinateSweeps.convolutionPower (f n) r))^2 +
+            nontrivialEnergy (BinaryCoordinateSweeps.convolutionPower (f n) r)) := by
+        rw [← Real.sqrt_sq (show 0 ≤ 2 * BinaryCoordinateSweeps.totalVariation
+            (BinaryCoordinateSweeps.convolutionPower (f n) r)
+            (BinaryCoordinateSweeps.uniformLaw (Equiv.Perm (Fin n))) from
+          mul_nonneg zero_le_two hnn)]
+        exact Real.sqrt_le_sqrt hdef
+      have h3 := h2
+      linarith
+    apply squeeze_zero (fun n => tv_nonneg _ _) hbound
+    have hsqrt : Tendsto (fun n => Real.sqrt ((1 -
+        mass (BinaryCoordinateSweeps.convolutionPower (f n) r))^2 +
+        nontrivialEnergy (BinaryCoordinateSweeps.convolutionPower (f n) r))) atTop
+        (nhds (Real.sqrt 0)) :=
+      (Real.continuous_sqrt.tendsto 0).comp hR
+    rw [Real.sqrt_zero] at hsqrt
+    have hsqrt2 := hsqrt.div_const 2
+    rwa [zero_div] at hsqrt2
+  apply squeeze_zero (fun n => tv_nonneg _ _) (fun n => tv_split_subprob (hμ n).1 (hμ n).2
+    (hf n).1 (hf n).2 r)
+  have htot := hpiece1.add hpiece2
+  simpa using htot
+
+end AssemblyProp
+
+/-! ## Slice 4b (HS half): the HS-side bridge
+
+The transported representation as a definition (shared by the HS bridge and
+any later consumer); the op form (slice 4a) predates it and keeps its inline
+construction — same content, both compiled. -/
+
+section HSBridge
+
+universe u
+
+/-- The HS-side bridge: the Hilbert–Schmidt bound at `irreducibleRep c` from
+`hhs` consumed at the transported representation, with `hsNormSq_conj` giving
+exact-value preservation. Mirrors `hopc_of_hop`'s proven inline structure
+(the `transportEquiv`/`transportRep` def-form refactor made the rewrite
+patterns unmatchable — the let-bound form is what compiles). -/
+lemma hopcHs_of_hhs {A γ : ℝ} {f : (n : ℕ) → Equiv.Perm (Fin n) → ℝ}
+    (hhs : ∀ n, ∀ (V : Type u) [NormedAddCommGroup V] [InnerProductSpace ℂ V]
+        [FiniteDimensional ℂ V] (ρ : Representation ℂ (Equiv.Perm (Fin n)) V),
+        Representation.IsIrreducible ρ → IsUnitary ρ → 1 < Module.finrank ℂ V →
+          hsNormSq (complexFourier ρ (fun g => (f n g : ℂ))) ≤
+            A * (Module.finrank ℂ V : ℝ) ^ (-γ))
+    (n : ℕ) (c : IrreducibleIndex (Equiv.Perm (Fin n))) (hc : 1 < irreducibleDegree c) :
+    hsNormSq (V := irreducibleSpace c) (complexFourier (V := irreducibleSpace c)
+        (irreducibleRep c) (fun g => (f n g : ℂ))) ≤
+      A * (irreducibleDegree c : ℝ) ^ (-γ) := by
+  classical
+  have hfr : Module.finrank ℂ ↥(irreducibleSpace c) = irreducibleDegree c := rfl
+  let e : ↥(irreducibleSpace c) ≃ₗᵢ[ℂ]
+      EuclideanSpace ℂ (ULift.{u} (Fin (irreducibleDegree c))) :=
+    (stdOrthonormalBasis ℂ ↥(irreducibleSpace c)).repr.trans
+      (LinearIsometryEquiv.piLpCongrLeft 2 ℂ ℂ
+        ((Equiv.cast (congrArg Fin hfr)).trans (Equiv.ulift.{u, 0}.symm)))
+  have hfinW : Module.finrank ℂ (EuclideanSpace ℂ (ULift.{u} (Fin (irreducibleDegree c)))) =
+      irreducibleDegree c := by
+    rw [← hfr]
+    exact e.toLinearEquiv.finrank_eq.symm
+  have hρ'U : IsUnitary (conjRep e.toLinearEquiv (irreducibleRep c)) := by
+    intro g x y
+    rw [conjRep_apply, conjRep_apply]
+    have hsymm : ∀ w : EuclideanSpace ℂ (ULift.{u} (Fin (irreducibleDegree c))),
+        (e.toLinearEquiv).symm w = e.symm w := fun w => rfl
+    rw [LinearIsometryEquiv.coe_toLinearEquiv, hsymm, hsymm]
+    have he : ∀ A B : ↥(irreducibleSpace c), inner ℂ (e A) (e B) = inner ℂ A B := by
+      intro A B
+      rw [Submodule.coe_inner]
+      rw [inner_eq_sum_norm_sq_div_four, inner_eq_sum_norm_sq_div_four]
+      have he_norm : ∀ w : ↥(irreducibleSpace c), ‖e w‖ = ‖w‖ :=
+        fun w => e.toLinearIsometry.norm_map w
+      simp only [← map_add, ← map_sub, ← map_smul, he_norm, ← Submodule.coe_add,
+        ← Submodule.coe_sub, ← Submodule.coe_smul, Submodule.norm_coe]
+    rw [he]
+    rw [irreducibleRep_unitary c g]
+    have heS : ∀ u v : EuclideanSpace ℂ (ULift.{u} (Fin (irreducibleDegree c))),
+        inner ℂ (e.symm u) (e.symm v) = inner ℂ u v := by
+      intro u v
+      rw [Submodule.coe_inner]
+      rw [inner_eq_sum_norm_sq_div_four, inner_eq_sum_norm_sq_div_four]
+      have heS_norm : ∀ w : EuclideanSpace ℂ (ULift.{u} (Fin (irreducibleDegree c))),
+          ‖e.symm w‖ = ‖w‖ := fun w => e.symm.toLinearIsometry.norm_map w
+      simp only [← map_add, ← map_sub, ← map_smul, heS_norm, ← Submodule.coe_add,
+        ← Submodule.coe_sub, ← Submodule.coe_smul, Submodule.norm_coe]
+    exact heS x y
+  have hb := hhs n (EuclideanSpace ℂ (ULift.{u} (Fin (irreducibleDegree c))))
+    (conjRep e.toLinearEquiv (irreducibleRep c))
+    (conjRep_isIrreducible e.toLinearEquiv (irreducibleRep c) inferInstance)
+    hρ'U
+    (by rw [hfinW]; exact hc)
+  rw [hfinW] at hb
+  rw [complexFourier_conjRep e.toLinearEquiv (irreducibleRep c), hsNormSq_conj] at hb
+  exact hb
+
+end HSBridge
+
 end
 end PartialPermutation
 

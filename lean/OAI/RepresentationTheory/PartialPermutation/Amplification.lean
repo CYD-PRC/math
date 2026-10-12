@@ -194,6 +194,20 @@ lemma hsNormSq_convPower_le {G : Type*} [Group G] [Fintype G]
           ‖LinearMap.toContinuousLinearMap F‖ ^ (2 * r) := by
         rw [Nat.mul_comm 2 r, ← pow_mul]
 
+/-- The Hilbert–Schmidt norm of a convolution power, in pure HS form:
+`hsNormSq (f̂^{*r}) ≤ (hsNormSq f̂)^r` (submultiplicativity `hsNormSq_pow_le`
+behind the Fourier–convolution bridge). Generic in `V` — do NOT inline this
+rewrite at a giant subtype carrier (the `irreducibleSpace c` elaboration wall);
+apply it, as `deg_gt_one_energy_term_le_hs` does. -/
+lemma hsNormSq_convPower_le_hs {G : Type*} [Group G] [Fintype G]
+    {V : Type*} [NormedAddCommGroup V] [InnerProductSpace ℂ V] [FiniteDimensional ℂ V]
+    (ρ : Representation ℂ G V) (f : G → ℝ) {r : ℕ} (hr : 1 ≤ r) :
+    hsNormSq (complexFourier ρ
+        (fun g => ((BinaryCoordinateSweeps.convolutionPower f r g : ℝ) : ℂ)))
+      ≤ (hsNormSq (complexFourier ρ (fun g => (f g : ℂ)))) ^ r := by
+  rw [← complexConvolutionPower_ofReal, complexFourier_convPower]
+  exact hsNormSq_pow_le _ hr
+
 /-! ## Slice 2a: the sign index
 
 The one-dimensional sign representation, extracted into the facility's
@@ -1128,6 +1142,103 @@ lemma nontrivialEnergy_convPower_le {n : ℕ} (hn : 2 ≤ n) {A β : ℝ} (hA : 
         · intro c _ _
           positivity
 
+/-- Pointwise bound on a degree->1 energy term from the Hilbert–Schmidt bound
+at that index (the HS analogue of `deg_gt_one_energy_term_le`, via the
+submultiplicativity `hsNormSq_pow_le` in place of `hsNormSq_convPower_le`). -/
+lemma deg_gt_one_energy_term_le_hs {n : ℕ} {A γ : ℝ} (_hA : 0 < A) (r : ℕ) (hr1 : 1 ≤ r)
+    (f : Equiv.Perm (Fin n) → ℝ)
+    (c : IrreducibleIndex (Equiv.Perm (Fin n))) (hc : 1 < irreducibleDegree c)
+    (hF : hsNormSq (V := irreducibleSpace c) (complexFourier (V := irreducibleSpace c)
+        (irreducibleRep c) (fun g => (f g : ℂ)))
+      ≤ A * (irreducibleDegree c : ℝ) ^ (-γ)) :
+    (irreducibleDegree c : ℝ) * hsNormSq (V := irreducibleSpace c)
+        (complexFourier (V := irreducibleSpace c) (irreducibleRep c)
+          (fun g => ((BinaryCoordinateSweeps.convolutionPower f r g : ℝ) : ℂ))) ≤
+      A ^ r * (irreducibleDegree c : ℝ) ^ (1 - (r : ℝ) * γ) := by
+  have hD : (0 : ℝ) < irreducibleDegree c := by exact_mod_cast zero_lt_one.trans hc
+  have h0 : (0 : ℝ) ≤ hsNormSq (V := irreducibleSpace c)
+      (complexFourier (V := irreducibleSpace c) (irreducibleRep c) fun g => (f g : ℂ)) :=
+    hsNormSq_nonneg _
+  have hpow : ((irreducibleDegree c : ℝ) ^ (-γ)) ^ r =
+      (irreducibleDegree c : ℝ) ^ (-((r : ℝ) * γ)) := by
+    rw [← Real.rpow_natCast _ r, ← Real.rpow_mul hD.le]
+    congr 1
+    ring
+  have hcomb : (irreducibleDegree c : ℝ) * (irreducibleDegree c : ℝ) ^ (-((r : ℝ) * γ)) =
+      (irreducibleDegree c : ℝ) ^ (1 - (r : ℝ) * γ) := by
+    rw [show (1 : ℝ) - (r : ℝ) * γ = 1 + (-((r : ℝ) * γ)) by ring,
+      Real.rpow_add hD, Real.rpow_one]
+  calc (irreducibleDegree c : ℝ) * hsNormSq (V := irreducibleSpace c)
+        (complexFourier (V := irreducibleSpace c) (irreducibleRep c)
+          (fun g => ((BinaryCoordinateSweeps.convolutionPower f r g : ℝ) : ℂ)))
+      ≤ (irreducibleDegree c : ℝ) *
+          (hsNormSq (V := irreducibleSpace c) (complexFourier (V := irreducibleSpace c)
+            (irreducibleRep c) fun g => (f g : ℂ))) ^ r :=
+        mul_le_mul_of_nonneg_left (hsNormSq_convPower_le_hs _ _ hr1) hD.le
+    _ ≤ (irreducibleDegree c : ℝ) * (A * (irreducibleDegree c : ℝ) ^ (-γ)) ^ r :=
+        mul_le_mul_of_nonneg_left (pow_le_pow_left₀ h0 hF r) hD.le
+    _ = A ^ r * (irreducibleDegree c : ℝ) ^ (1 - (r : ℝ) * γ) := by
+        rw [mul_pow, hpow]
+        have hcomm : (irreducibleDegree c : ℝ) * (A ^ r *
+            (irreducibleDegree c : ℝ) ^ (-((r : ℝ) * γ))) =
+            A ^ r * ((irreducibleDegree c : ℝ) *
+              (irreducibleDegree c : ℝ) ^ (-((r : ℝ) * γ))) := by ring
+        rw [hcomm, hcomb]
+
+/-- The Hilbert–Schmidt analogue of `nontrivialEnergy_convPower_le`: the
+nontrivial energy of the `r`-th convolution power is bounded by the `2r`-th
+power of the sign mean plus `A^r` times the degree sum with exponent
+`1 − rγ` (paper Prop 2.5's HS case: `D‖f̂ʳ‖²_HS ≤ A^r D^{1−rγ}`). -/
+lemma nontrivialEnergy_convPower_le_hs {n : ℕ} (hn : 2 ≤ n) {A γ : ℝ} (hA : 0 < A) (r : ℕ)
+    (hr1 : 1 ≤ r)
+    (f : Equiv.Perm (Fin n) → ℝ)
+    (hhsc : ∀ c : IrreducibleIndex (Equiv.Perm (Fin n)), 1 < irreducibleDegree c →
+      hsNormSq (V := irreducibleSpace c) (complexFourier (V := irreducibleSpace c)
+          (irreducibleRep c) (fun g => (f g : ℂ)))
+        ≤ A * (irreducibleDegree c : ℝ) ^ (-γ)) :
+    nontrivialEnergy (BinaryCoordinateSweeps.convolutionPower f r) ≤
+      (∑ g, f g * BinaryCoordinateSweeps.realSign g) ^ (2 * r) +
+        A ^ r * (∑ c : IrreducibleIndex (Equiv.Perm (Fin n)),
+          if 1 < irreducibleDegree c
+            then (irreducibleDegree c : ℝ) ^ (1 - (r : ℝ) * γ) else 0) := by
+  classical
+  have hdeg1 : ∀ c ∈ (Finset.univ.erase (trivialIndex (Equiv.Perm (Fin n)))).erase
+      (signIndex n), 1 < irreducibleDegree c := by
+    intro c hc
+    obtain ⟨hneS, hmem1⟩ := Finset.mem_erase.mp hc
+    obtain ⟨hneT, -⟩ := Finset.mem_erase.mp hmem1
+    by_contra hlt
+    rw [not_lt] at hlt
+    have h1 : irreducibleDegree c = 1 := le_antisymm hlt (one_le_irreducibleDegree c)
+    rcases degree_one_eq_trivial_or_sign hn c h1 with ht | hs
+    · exact hneT ht
+    · exact hneS hs
+  rw [nontrivialEnergy_eq_sign_add hn, hsNormSq_signIndex_convPower]
+  apply add_le_add_right
+  calc ∑ c ∈ (Finset.univ.erase (trivialIndex (Equiv.Perm (Fin n)))).erase (signIndex n),
+        (irreducibleDegree c : ℝ) * hsNormSq (V := irreducibleSpace c)
+          (complexFourier (V := irreducibleSpace c) (irreducibleRep c)
+            (fun g => ((BinaryCoordinateSweeps.convolutionPower f r g : ℝ) : ℂ)))
+      ≤ ∑ c ∈ (Finset.univ.erase (trivialIndex (Equiv.Perm (Fin n)))).erase (signIndex n),
+        A ^ r * (irreducibleDegree c : ℝ) ^ (1 - (r : ℝ) * γ) := by
+        apply Finset.sum_le_sum
+        intro c hc
+        exact deg_gt_one_energy_term_le_hs hA r hr1 f c (hdeg1 c hc) (hhsc c (hdeg1 c hc))
+    _ = A ^ r * ∑ c ∈ (Finset.univ.erase (trivialIndex (Equiv.Perm (Fin n)))).erase
+          (signIndex n), (irreducibleDegree c : ℝ) ^ (1 - (r : ℝ) * γ) :=
+        (Finset.mul_sum _ _ _).symm
+    _ ≤ A ^ r * ∑ c : IrreducibleIndex (Equiv.Perm (Fin n)),
+          if 1 < irreducibleDegree c
+            then (irreducibleDegree c : ℝ) ^ (1 - (r : ℝ) * γ) else 0 := by
+        apply mul_le_mul_of_nonneg_left _ (pow_nonneg hA.le _)
+        rw [← Finset.sum_filter]
+        apply Finset.sum_le_sum_of_subset_of_nonneg
+        · intro c hc
+          rw [Finset.mem_filter]
+          exact ⟨Finset.mem_univ _, hdeg1 c hc⟩
+        · intro c _ _
+          positivity
+
 end EnergySplit
 
 /-! ## Slice 4a: presentation transport along a linear equivalence
@@ -1420,6 +1531,68 @@ lemma hopc_of_hop {A β : ℝ} {f : (n : ℕ) → Equiv.Perm (Fin n) → ℝ}
   rw [complexFourier_conjRep e.toLinearEquiv (irreducibleRep c), opNorm_conj] at hb
   exact hb
 
+/-- The HS-side bridge: the Hilbert–Schmidt bound at `irreducibleRep c` from
+`hhs` consumed at the transported representation, with `hsNormSq_conj` giving
+exact-value preservation. Mirrors `hopc_of_hop`'s proven inline structure
+(the `transportEquiv`/`transportRep` def-form refactor made the rewrite
+patterns unmatchable — the let-bound form is what compiles). Lives in this
+section (next to `hopc_of_hop`) because `hs_energy_tendsto_zero` consumes it. -/
+lemma hopcHs_of_hhs {A γ : ℝ} {f : (n : ℕ) → Equiv.Perm (Fin n) → ℝ}
+    (hhs : ∀ n, ∀ (V : Type u) [NormedAddCommGroup V] [InnerProductSpace ℂ V]
+        [FiniteDimensional ℂ V] (ρ : Representation ℂ (Equiv.Perm (Fin n)) V),
+        Representation.IsIrreducible ρ → IsUnitary ρ → 1 < Module.finrank ℂ V →
+          hsNormSq (complexFourier ρ (fun g => (f n g : ℂ))) ≤
+            A * (Module.finrank ℂ V : ℝ) ^ (-γ))
+    (n : ℕ) (c : IrreducibleIndex (Equiv.Perm (Fin n))) (hc : 1 < irreducibleDegree c) :
+    hsNormSq (V := irreducibleSpace c) (complexFourier (V := irreducibleSpace c)
+        (irreducibleRep c) (fun g => (f n g : ℂ))) ≤
+      A * (irreducibleDegree c : ℝ) ^ (-γ) := by
+  classical
+  have hfr : Module.finrank ℂ ↥(irreducibleSpace c) = irreducibleDegree c := rfl
+  let e : ↥(irreducibleSpace c) ≃ₗᵢ[ℂ]
+      EuclideanSpace ℂ (ULift.{u} (Fin (irreducibleDegree c))) :=
+    (stdOrthonormalBasis ℂ ↥(irreducibleSpace c)).repr.trans
+      (LinearIsometryEquiv.piLpCongrLeft 2 ℂ ℂ
+        ((Equiv.cast (congrArg Fin hfr)).trans (Equiv.ulift.{u, 0}.symm)))
+  have hfinW : Module.finrank ℂ (EuclideanSpace ℂ (ULift.{u} (Fin (irreducibleDegree c)))) =
+      irreducibleDegree c := by
+    rw [← hfr]
+    exact e.toLinearEquiv.finrank_eq.symm
+  have hρ'U : IsUnitary (conjRep e.toLinearEquiv (irreducibleRep c)) := by
+    intro g x y
+    rw [conjRep_apply, conjRep_apply]
+    have hsymm : ∀ w : EuclideanSpace ℂ (ULift.{u} (Fin (irreducibleDegree c))),
+        (e.toLinearEquiv).symm w = e.symm w := fun w => rfl
+    rw [LinearIsometryEquiv.coe_toLinearEquiv, hsymm, hsymm]
+    have he : ∀ A B : ↥(irreducibleSpace c), inner ℂ (e A) (e B) = inner ℂ A B := by
+      intro A B
+      rw [Submodule.coe_inner]
+      rw [inner_eq_sum_norm_sq_div_four, inner_eq_sum_norm_sq_div_four]
+      have he_norm : ∀ w : ↥(irreducibleSpace c), ‖e w‖ = ‖w‖ :=
+        fun w => e.toLinearIsometry.norm_map w
+      simp only [← map_add, ← map_sub, ← map_smul, he_norm, ← Submodule.coe_add,
+        ← Submodule.coe_sub, ← Submodule.coe_smul, Submodule.norm_coe]
+    rw [he]
+    rw [irreducibleRep_unitary c g]
+    have heS : ∀ u v : EuclideanSpace ℂ (ULift.{u} (Fin (irreducibleDegree c))),
+        inner ℂ (e.symm u) (e.symm v) = inner ℂ u v := by
+      intro u v
+      rw [Submodule.coe_inner]
+      rw [inner_eq_sum_norm_sq_div_four, inner_eq_sum_norm_sq_div_four]
+      have heS_norm : ∀ w : EuclideanSpace ℂ (ULift.{u} (Fin (irreducibleDegree c))),
+          ‖e.symm w‖ = ‖w‖ := fun w => e.symm.toLinearIsometry.norm_map w
+      simp only [← map_add, ← map_sub, ← map_smul, heS_norm, ← Submodule.coe_add,
+        ← Submodule.coe_sub, ← Submodule.coe_smul, Submodule.norm_coe]
+    exact heS x y
+  have hb := hhs n (EuclideanSpace ℂ (ULift.{u} (Fin (irreducibleDegree c))))
+    (conjRep e.toLinearEquiv (irreducibleRep c))
+    (conjRep_isIrreducible e.toLinearEquiv (irreducibleRep c) inferInstance)
+    hρ'U
+    (by rw [hfinW]; exact hc)
+  rw [hfinW] at hb
+  rw [complexFourier_conjRep e.toLinearEquiv (irreducibleRep c), hsNormSq_conj] at hb
+  exact hb
+
 end PresentationTransport
 
 /-! ## Slice 4b: assembly of Proposition 2.5 (operator and Hilbert–Schmidt forms)
@@ -1524,14 +1697,14 @@ lemma abs_realSign {n : ℕ} (g : Equiv.Perm (Fin n)) :
 /-- The sign mean of the subprobability is squeezed to zero by the ambient
 sign mean and the mass convergence: `signMean f = signMean μ − mass((μ−f)·s)`
 where the second term is bounded by `1 − mass f`. -/
-lemma signMean_tendsto_zero {μ f : (n : ℕ) → Equiv.Perm (Fin n) → ℝ}
-    (hμ : ∀ n, (∀ g, 0 ≤ μ n g) ∧ mass (μ n) = 1)
-    (hf : ∀ n, (∀ g, 0 ≤ f n g) ∧ ∀ g, f n g ≤ μ n g)
-    (hmass : Tendsto (fun n => mass (f n)) atTop (nhds 1))
+lemma signMean_tendsto_zero {l : Filter ℕ} {μ f : (n : ℕ) → Equiv.Perm (Fin n) → ℝ}
+    (hμ : ∀ᶠ n in l, (∀ g, 0 ≤ μ n g) ∧ mass (μ n) = 1)
+    (hf : ∀ᶠ n in l, (∀ g, 0 ≤ f n g) ∧ ∀ g, f n g ≤ μ n g)
+    (hmass : Tendsto (fun n => mass (f n)) l (nhds 1))
     (hsign : Tendsto (fun n => mass (fun g => μ n g * BinaryCoordinateSweeps.realSign g))
-      atTop (nhds 0)) :
+      l (nhds 0)) :
     Tendsto (fun n => mass (fun g => f n g * BinaryCoordinateSweeps.realSign g))
-      atTop (nhds 0) := by
+      l (nhds 0) := by
   have hdecomp : ∀ n, mass (fun g => f n g * BinaryCoordinateSweeps.realSign g) =
       mass (fun g => μ n g * BinaryCoordinateSweeps.realSign g) -
         mass (fun g => (μ n g - f n g) * BinaryCoordinateSweeps.realSign g) := by
@@ -1543,9 +1716,9 @@ lemma signMean_tendsto_zero {μ f : (n : ℕ) → Equiv.Perm (Fin n) → ℝ}
     apply Finset.sum_congr rfl
     intro g _
     ring
-  have hbound : ∀ n, |mass (fun g => (μ n g - f n g) * BinaryCoordinateSweeps.realSign g)| ≤
+  have hbound : ∀ᶠ n in l, |mass (fun g => (μ n g - f n g) * BinaryCoordinateSweeps.realSign g)| ≤
       1 - mass (f n) := by
-    intro n
+    filter_upwards [hμ, hf] with n hμn hfn
     calc |∑ g, (μ n g - f n g) * BinaryCoordinateSweeps.realSign g|
         ≤ ∑ g, |(μ n g - f n g) * BinaryCoordinateSweeps.realSign g| :=
           Finset.abs_sum_le_sum_abs _ _
@@ -1553,25 +1726,25 @@ lemma signMean_tendsto_zero {μ f : (n : ℕ) → Equiv.Perm (Fin n) → ℝ}
           apply Finset.sum_congr rfl
           intro g _
           rw [abs_mul, abs_realSign, mul_one]
-          exact abs_of_nonneg (sub_nonneg.mpr ((hf n).2 g))
+          exact abs_of_nonneg (sub_nonneg.mpr (hfn.2 g))
       _ = mass (μ n) - mass (f n) := by
           show (∑ g, (μ n g - f n g)) = (∑ g, μ n g) - ∑ g, f n g
           rw [← Finset.sum_sub_distrib]
-      _ = 1 - mass (f n) := by rw [(hμ n).2]
+      _ = 1 - mass (f n) := by rw [hμn.2]
   have hdiff0 : Tendsto (fun n => mass (fun g => (μ n g - f n g) *
-      BinaryCoordinateSweeps.realSign g)) atTop (nhds 0) := by
-    have hU : Tendsto (fun n => 1 - mass (f n)) atTop (nhds 0) := by
+      BinaryCoordinateSweeps.realSign g)) l (nhds 0) := by
+    have hU : Tendsto (fun n => 1 - mass (f n)) l (nhds 0) := by
       have h := (tendsto_const_nhds (x := (1 : ℝ))).sub hmass
       simpa using h
-    have hL : Tendsto (fun n => -(1 - mass (f n))) atTop (nhds 0) := by
+    have hL : Tendsto (fun n => -(1 - mass (f n))) l (nhds 0) := by
       have h := hU.neg
       simpa using h
-    apply tendsto_of_tendsto_of_tendsto_of_le_of_le hL hU
-    · intro n; exact (abs_le.mp (hbound n)).1
-    · intro n; exact (abs_le.mp (hbound n)).2
+    apply tendsto_of_tendsto_of_tendsto_of_le_of_le' hL hU
+    · filter_upwards [hbound] with n h; exact (abs_le.mp h).1
+    · filter_upwards [hbound] with n h; exact (abs_le.mp h).2
   have hlim := hsign.sub hdiff0
   have hlim' : Tendsto (fun n => mass (fun g => f n g * BinaryCoordinateSweeps.realSign g))
-      atTop (nhds (0 - 0)) := hlim.congr' (Eventually.of_forall fun n => (hdecomp n).symm)
+      l (nhds (0 - 0)) := hlim.congr' (Eventually.of_forall fun n => (hdecomp n).symm)
   simpa using hlim'
 
 end Assembly
@@ -1666,22 +1839,25 @@ lemma tv_deficit_sq {n : ℕ} (f : Equiv.Perm (Fin n) → ℝ) :
 
 /-- The energy of the subprobability's `r`-th convolution power tends to zero
 (operator form): the sign term via the squeeze, the degree-`>1` terms via the
-transported operator bound and the degree-sum bridge. -/
-lemma operator_energy_tendsto_zero {A β : ℝ} (hA : 0 < A) (_hβ : 0 < β) (r : ℕ)
+transported operator bound and the degree-sum bridge. Filter-generic: the
+hypotheses are `l`-indexed; the atTop-proved degree sum is pulled back along
+`hl`. (Both `atTop` and `eightDivisible` are `≤ atTop`.) -/
+lemma operator_energy_tendsto_zero {l : Filter ℕ} (hl : l ≤ atTop)
+    {A β : ℝ} (hA : 0 < A) (_hβ : 0 < β) (r : ℕ)
     (hr : (2:ℝ) - 2 * (r:ℝ) * β < 0)
     {μ f : (n : ℕ) → Equiv.Perm (Fin n) → ℝ}
-    (hμ : ∀ n, (∀ g, 0 ≤ μ n g) ∧ mass (μ n) = 1)
-    (hf : ∀ n, (∀ g, 0 ≤ f n g) ∧ ∀ g, f n g ≤ μ n g)
-    (hmass : Tendsto (fun n => mass (f n)) atTop (nhds 1))
+    (hμ : ∀ᶠ n in l, (∀ g, 0 ≤ μ n g) ∧ mass (μ n) = 1)
+    (hf : ∀ᶠ n in l, (∀ g, 0 ≤ f n g) ∧ ∀ g, f n g ≤ μ n g)
+    (hmass : Tendsto (fun n => mass (f n)) l (nhds 1))
     (hsign : Tendsto (fun n => mass (fun g => μ n g * BinaryCoordinateSweeps.realSign g))
-      atTop (nhds 0))
+      l (nhds 0))
     (hop : ∀ n, ∀ (V : Type u) [NormedAddCommGroup V] [InnerProductSpace ℂ V]
         [FiniteDimensional ℂ V] (ρ : Representation ℂ (Equiv.Perm (Fin n)) V),
         Representation.IsIrreducible ρ → IsUnitary ρ → 1 < Module.finrank ℂ V →
           ‖LinearMap.toContinuousLinearMap (complexFourier ρ (fun g => (f n g : ℂ)))‖
             ≤ A * (Module.finrank ℂ V : ℝ) ^ (-β)) :
     Tendsto (fun n => nontrivialEnergy (BinaryCoordinateSweeps.convolutionPower (f n) r))
-      atTop (nhds 0) := by
+      l (nhds 0) := by
   classical
   have hr1 : 1 ≤ r := by
     by_contra h
@@ -1690,15 +1866,15 @@ lemma operator_energy_tendsto_zero {A β : ℝ} (hA : 0 < A) (_hβ : 0 < β) (r 
     norm_num at hr
   have hsignf := signMean_tendsto_zero hμ hf hmass hsign
   have hp1 : Tendsto (fun n => (mass (fun g => f n g *
-      BinaryCoordinateSweeps.realSign g))^(2*r)) atTop (nhds 0) := by
+      BinaryCoordinateSweeps.realSign g))^(2*r)) l (nhds 0) := by
     have h := hsignf.pow (2*r)
     rwa [zero_pow (by omega : 2*r ≠ 0)] at h
   have hp2 : Tendsto (fun n => A^(2*r) * ∑ c : IrreducibleIndex (Equiv.Perm (Fin n)),
       if 1 < irreducibleDegree c then (irreducibleDegree c : ℝ)^(2 - 2*(r:ℝ)*β) else 0)
-      atTop (nhds 0) := by
+      l (nhds 0) := by
     have hexp : (2:ℝ) - 2*(r:ℝ)*β = -((2:ℝ)*(r:ℝ)*β - 2) := by ring
     have hs : 0 < (2:ℝ)*(r:ℝ)*β - 2 := by linarith
-    have hbridge := degreeSum_tendsto_zero ((2:ℝ)*(r:ℝ)*β - 2) hs
+    have hbridge := (degreeSum_tendsto_zero ((2:ℝ)*(r:ℝ)*β - 2) hs).mono_left hl
     have hEq : (fun n => A^(2*r) * ∑ c : IrreducibleIndex (Equiv.Perm (Fin n)),
         if 1 < irreducibleDegree c then (irreducibleDegree c : ℝ)^(2 - 2*(r:ℝ)*β) else 0) =
         (fun n => A^(2*r) * ∑ c : IrreducibleIndex (Equiv.Perm (Fin n)),
@@ -1715,7 +1891,7 @@ lemma operator_energy_tendsto_zero {A β : ℝ} (hA : 0 < A) (_hβ : 0 < β) (r 
   have hlim : Tendsto (fun n => (mass (fun g => f n g * BinaryCoordinateSweeps.realSign g))^(2*r) +
       A^(2*r) * ∑ c : IrreducibleIndex (Equiv.Perm (Fin n)),
         if 1 < irreducibleDegree c then (irreducibleDegree c : ℝ)^(2 - 2*(r:ℝ)*β) else 0)
-      atTop (nhds 0) := by
+      l (nhds 0) := by
     have h := hp1.add hp2
     simpa using h
   have hnn : ∀ n, 0 ≤ nontrivialEnergy (BinaryCoordinateSweeps.convolutionPower (f n) r) := by
@@ -1724,56 +1900,118 @@ lemma operator_energy_tendsto_zero {A β : ℝ} (hA : 0 < A) (_hβ : 0 < β) (r 
     apply Finset.sum_nonneg
     intro c _
     exact mul_nonneg (Nat.cast_nonneg _) (hsNormSq_nonneg _)
-  have hle : ∀ᶠ n in atTop, nontrivialEnergy (BinaryCoordinateSweeps.convolutionPower (f n) r) ≤
+  have hle : ∀ᶠ n in l, nontrivialEnergy (BinaryCoordinateSweeps.convolutionPower (f n) r) ≤
       (mass (fun g => f n g * BinaryCoordinateSweeps.realSign g))^(2*r) +
         A^(2*r) * ∑ c : IrreducibleIndex (Equiv.Perm (Fin n)),
           if 1 < irreducibleDegree c then (irreducibleDegree c : ℝ)^(2 - 2*(r:ℝ)*β) else 0 := by
-    filter_upwards [eventually_ge_atTop 2] with n hn
+    filter_upwards [(eventually_ge_atTop 2).filter_mono hl] with n hn
     exact nontrivialEnergy_convPower_le hn hA r (f n) (fun c hc => hopc_of_hop hop n c hc)
   exact squeeze_zero' (Eventually.of_forall hnn) hle hlim
 
-/-- Proposition 2.5, operator-norm form: a uniform power saving of the
-Fourier transform at every irreducible of degree > 1 amplifies to
-total-variation convergence after `r` convolutions whenever `2 − 2rβ < 0`. -/
-theorem fourier_amplification_operator
-    (A β : ℝ) (hA : 0 < A) (hβ : 0 < β) (r : ℕ)
-    (hr : (2 : ℝ) - 2 * (r : ℝ) * β < 0)
-    (μ f : (n : ℕ) → Equiv.Perm (Fin n) → ℝ)
-    (hμ : ∀ n, (∀ g, 0 ≤ μ n g) ∧ mass (μ n) = 1)
-    (hf : ∀ n, (∀ g, 0 ≤ f n g) ∧ ∀ g, f n g ≤ μ n g)
-    (hmass : Tendsto (fun n => mass (f n)) atTop (nhds 1))
-    (hsign : Tendsto (fun n => mass (fun g => μ n g *
-      BinaryCoordinateSweeps.realSign g)) atTop (nhds 0))
-    (hop : ∀ n, ∀ (V : Type u) [NormedAddCommGroup V] [InnerProductSpace ℂ V]
+/-- The energy of the subprobability's `r`-th convolution power tends to zero
+(Hilbert–Schmidt form): the sign term via the squeeze, the degree-`>1` terms via
+the transported HS bound and the degree-sum bridge with exponent `rγ − 1`. -/
+lemma hs_energy_tendsto_zero {l : Filter ℕ} (hl : l ≤ atTop)
+    {A γ : ℝ} (hA : 0 < A) (_hγ : 0 < γ) (r : ℕ)
+    (hr : (1:ℝ) - (r:ℝ) * γ < 0)
+    {μ f : (n : ℕ) → Equiv.Perm (Fin n) → ℝ}
+    (hμ : ∀ᶠ n in l, (∀ g, 0 ≤ μ n g) ∧ mass (μ n) = 1)
+    (hf : ∀ᶠ n in l, (∀ g, 0 ≤ f n g) ∧ ∀ g, f n g ≤ μ n g)
+    (hmass : Tendsto (fun n => mass (f n)) l (nhds 1))
+    (hsign : Tendsto (fun n => mass (fun g => μ n g * BinaryCoordinateSweeps.realSign g))
+      l (nhds 0))
+    (hhs : ∀ n, ∀ (V : Type u) [NormedAddCommGroup V] [InnerProductSpace ℂ V]
         [FiniteDimensional ℂ V] (ρ : Representation ℂ (Equiv.Perm (Fin n)) V),
         Representation.IsIrreducible ρ → IsUnitary ρ → 1 < Module.finrank ℂ V →
-          ‖LinearMap.toContinuousLinearMap (complexFourier ρ (fun g => (f n g : ℂ)))‖
-            ≤ A * (Module.finrank ℂ V : ℝ) ^ (-β)) :
+          hsNormSq (complexFourier ρ (fun g => (f n g : ℂ)))
+            ≤ A * (Module.finrank ℂ V : ℝ) ^ (-γ)) :
+    Tendsto (fun n => nontrivialEnergy (BinaryCoordinateSweeps.convolutionPower (f n) r))
+      l (nhds 0) := by
+  classical
+  have hr1 : 1 ≤ r := by
+    by_contra h
+    rw [not_le] at h
+    obtain rfl := Nat.lt_one_iff.mp h
+    norm_num at hr
+  have hsignf := signMean_tendsto_zero hμ hf hmass hsign
+  have hp1 : Tendsto (fun n => (mass (fun g => f n g *
+      BinaryCoordinateSweeps.realSign g))^(2*r)) l (nhds 0) := by
+    have h := hsignf.pow (2*r)
+    rwa [zero_pow (by omega : 2*r ≠ 0)] at h
+  have hp2 : Tendsto (fun n => A^r * ∑ c : IrreducibleIndex (Equiv.Perm (Fin n)),
+      if 1 < irreducibleDegree c then (irreducibleDegree c : ℝ)^(1 - (r:ℝ)*γ) else 0)
+      l (nhds 0) := by
+    have hexp : (1:ℝ) - (r:ℝ)*γ = -((r:ℝ)*γ - 1) := by ring
+    have hs : 0 < (r:ℝ)*γ - 1 := by linarith
+    have hbridge := (degreeSum_tendsto_zero ((r:ℝ)*γ - 1) hs).mono_left hl
+    have hEq : (fun n => A^r * ∑ c : IrreducibleIndex (Equiv.Perm (Fin n)),
+        if 1 < irreducibleDegree c then (irreducibleDegree c : ℝ)^(1 - (r:ℝ)*γ) else 0) =
+        (fun n => A^r * ∑ c : IrreducibleIndex (Equiv.Perm (Fin n)),
+        if 1 < irreducibleDegree c then (irreducibleDegree c : ℝ)^(-((r:ℝ)*γ - 1))
+          else 0) := by
+      funext n
+      apply congrArg (A^r * ·)
+      apply Finset.sum_congr rfl
+      intro c _
+      rw [hexp]
+    rw [hEq]
+    have h := hbridge.const_mul (A^r)
+    rwa [mul_zero] at h
+  have hlim : Tendsto (fun n => (mass (fun g => f n g * BinaryCoordinateSweeps.realSign g))^(2*r) +
+      A^r * ∑ c : IrreducibleIndex (Equiv.Perm (Fin n)),
+        if 1 < irreducibleDegree c then (irreducibleDegree c : ℝ)^(1 - (r:ℝ)*γ) else 0)
+      l (nhds 0) := by
+    have h := hp1.add hp2
+    simpa using h
+  have hnn : ∀ n, 0 ≤ nontrivialEnergy (BinaryCoordinateSweeps.convolutionPower (f n) r) := by
+    intro n
+    unfold nontrivialEnergy
+    apply Finset.sum_nonneg
+    intro c _
+    exact mul_nonneg (Nat.cast_nonneg _) (hsNormSq_nonneg _)
+  have hle : ∀ᶠ n in l, nontrivialEnergy (BinaryCoordinateSweeps.convolutionPower (f n) r) ≤
+      (mass (fun g => f n g * BinaryCoordinateSweeps.realSign g))^(2*r) +
+        A^r * ∑ c : IrreducibleIndex (Equiv.Perm (Fin n)),
+          if 1 < irreducibleDegree c then (irreducibleDegree c : ℝ)^(1 - (r:ℝ)*γ) else 0 := by
+    filter_upwards [(eventually_ge_atTop 2).filter_mono hl] with n hn
+    exact nontrivialEnergy_convPower_le_hs hn hA r hr1 (f n)
+      (fun c hc => hopcHs_of_hhs hhs n c hc)
+  exact squeeze_zero' (Eventually.of_forall hnn) hle hlim
+
+/-- The shared convergence exit of Proposition 2.5 (both norms) and the two
+convergence corollaries: given a subprobability `f ≤ μ` (eventually along `l`)
+whose mass tends to one and whose `r`-fold convolution energy tends to zero,
+`μ^{*r}` tends to uniform in total variation along `l`. -/
+theorem tv_tendsto_zero_of_energy {l : Filter ℕ} (r : ℕ)
+    {μ f : (n : ℕ) → Equiv.Perm (Fin n) → ℝ}
+    (hμ : ∀ᶠ n in l, (∀ g, 0 ≤ μ n g) ∧ mass (μ n) = 1)
+    (hf : ∀ᶠ n in l, (∀ g, 0 ≤ f n g) ∧ ∀ g, f n g ≤ μ n g)
+    (hmass : Tendsto (fun n => mass (f n)) l (nhds 1))
+    (henergy : Tendsto (fun n => nontrivialEnergy
+      (BinaryCoordinateSweeps.convolutionPower (f n) r)) l (nhds 0)) :
     Tendsto (fun n => BinaryCoordinateSweeps.totalVariation
         (BinaryCoordinateSweeps.convolutionPower (μ n) r)
-        (BinaryCoordinateSweeps.uniformLaw (Equiv.Perm (Fin n))))
-      atTop (nhds 0) := by
+        (BinaryCoordinateSweeps.uniformLaw (Equiv.Perm (Fin n)))) l (nhds 0) := by
   classical
   have hm1 : Tendsto (fun n => mass (BinaryCoordinateSweeps.convolutionPower (f n) r))
-      atTop (nhds 1) := by
-    have h1 : Tendsto (fun n => mass (f n)^r) atTop (nhds (1^r)) := hmass.pow r
+      l (nhds 1) := by
+    have h1 : Tendsto (fun n => mass (f n)^r) l (nhds (1^r)) := hmass.pow r
     have h2 : (fun n => mass (BinaryCoordinateSweeps.convolutionPower (f n) r)) =
         (fun n => mass (f n)^r) := funext fun n => mass_convolutionPower _ _
     rw [h2]
     simpa using h1
   have hpiece1 : Tendsto (fun n =>
-      (1 - mass (BinaryCoordinateSweeps.convolutionPower (f n) r))/2) atTop (nhds 0) := by
+      (1 - mass (BinaryCoordinateSweeps.convolutionPower (f n) r))/2) l (nhds 0) := by
     have h := ((tendsto_const_nhds (x := (1:ℝ))).sub hm1).div_const 2
     simpa using h
   have hpiece2 : Tendsto (fun n => BinaryCoordinateSweeps.totalVariation
       (BinaryCoordinateSweeps.convolutionPower (f n) r)
-      (BinaryCoordinateSweeps.uniformLaw (Equiv.Perm (Fin n)))) atTop (nhds 0) := by
+      (BinaryCoordinateSweeps.uniformLaw (Equiv.Perm (Fin n)))) l (nhds 0) := by
     have hR : Tendsto (fun n => (1 - mass (BinaryCoordinateSweeps.convolutionPower (f n) r))^2 +
-        nontrivialEnergy (BinaryCoordinateSweeps.convolutionPower (f n) r)) atTop (nhds 0) := by
+        nontrivialEnergy (BinaryCoordinateSweeps.convolutionPower (f n) r)) l (nhds 0) := by
       have h1 : Tendsto (fun n => (1 - mass (BinaryCoordinateSweeps.convolutionPower (f n) r))^2)
-          atTop (nhds ((1-1)^2)) := ((tendsto_const_nhds (x := (1:ℝ))).sub hm1).pow 2
-      have h2 := operator_energy_tendsto_zero hA hβ r hr hμ hf hmass hsign hop
-      have h3 := h1.add h2
+          l (nhds ((1-1)^2)) := ((tendsto_const_nhds (x := (1:ℝ))).sub hm1).pow 2
+      have h3 := h1.add henergy
       simpa using h3
     have hbound : ∀ n, BinaryCoordinateSweeps.totalVariation
         (BinaryCoordinateSweeps.convolutionPower (f n) r)
@@ -1799,91 +2037,70 @@ theorem fourier_amplification_operator
     apply squeeze_zero (fun n => tv_nonneg _ _) hbound
     have hsqrt : Tendsto (fun n => Real.sqrt ((1 -
         mass (BinaryCoordinateSweeps.convolutionPower (f n) r))^2 +
-        nontrivialEnergy (BinaryCoordinateSweeps.convolutionPower (f n) r))) atTop
+        nontrivialEnergy (BinaryCoordinateSweeps.convolutionPower (f n) r))) l
         (nhds (Real.sqrt 0)) :=
       (Real.continuous_sqrt.tendsto 0).comp hR
     rw [Real.sqrt_zero] at hsqrt
     have hsqrt2 := hsqrt.div_const 2
     rwa [zero_div] at hsqrt2
-  apply squeeze_zero (fun n => tv_nonneg _ _) (fun n => tv_split_subprob (hμ n).1 (hμ n).2
-    (hf n).1 (hf n).2 r)
-  have htot := hpiece1.add hpiece2
-  simpa using htot
+  apply squeeze_zero' (Eventually.of_forall fun n => tv_nonneg _ _)
+  · filter_upwards [hμ, hf] with n hμn hfn
+    exact tv_split_subprob hμn.1 hμn.2 hfn.1 hfn.2 r
+  · have htot := hpiece1.add hpiece2
+    simpa using htot
 
-end AssemblyProp
+/-- Proposition 2.5, operator-norm form: a uniform power saving of the
+Fourier transform at every irreducible of degree > 1 amplifies to
+total-variation convergence after `r` convolutions whenever `2 − 2rβ < 0`. -/
+theorem fourier_amplification_operator
+    (A β : ℝ) (hA : 0 < A) (hβ : 0 < β) (r : ℕ)
+    (hr : (2 : ℝ) - 2 * (r : ℝ) * β < 0)
+    (μ f : (n : ℕ) → Equiv.Perm (Fin n) → ℝ)
+    (hμ : ∀ n, (∀ g, 0 ≤ μ n g) ∧ mass (μ n) = 1)
+    (hf : ∀ n, (∀ g, 0 ≤ f n g) ∧ ∀ g, f n g ≤ μ n g)
+    (hmass : Tendsto (fun n => mass (f n)) atTop (nhds 1))
+    (hsign : Tendsto (fun n => mass (fun g => μ n g *
+      BinaryCoordinateSweeps.realSign g)) atTop (nhds 0))
+    (hop : ∀ n, ∀ (V : Type u) [NormedAddCommGroup V] [InnerProductSpace ℂ V]
+        [FiniteDimensional ℂ V] (ρ : Representation ℂ (Equiv.Perm (Fin n)) V),
+        Representation.IsIrreducible ρ → IsUnitary ρ → 1 < Module.finrank ℂ V →
+          ‖LinearMap.toContinuousLinearMap (complexFourier ρ (fun g => (f n g : ℂ)))‖
+            ≤ A * (Module.finrank ℂ V : ℝ) ^ (-β)) :
+    Tendsto (fun n => BinaryCoordinateSweeps.totalVariation
+        (BinaryCoordinateSweeps.convolutionPower (μ n) r)
+        (BinaryCoordinateSweeps.uniformLaw (Equiv.Perm (Fin n))))
+      atTop (nhds 0) := by
+  classical
+  exact tv_tendsto_zero_of_energy r (Eventually.of_forall hμ) (Eventually.of_forall hf) hmass
+    (operator_energy_tendsto_zero (le_refl atTop) hA hβ r hr
+      (Eventually.of_forall hμ) (Eventually.of_forall hf) hmass hsign hop)
 
-/-! ## Slice 4b (HS half): the HS-side bridge
-
-The transported representation as a definition (shared by the HS bridge and
-any later consumer); the op form (slice 4a) predates it and keeps its inline
-construction — same content, both compiled. -/
-
-section HSBridge
-
-universe u
-
-/-- The HS-side bridge: the Hilbert–Schmidt bound at `irreducibleRep c` from
-`hhs` consumed at the transported representation, with `hsNormSq_conj` giving
-exact-value preservation. Mirrors `hopc_of_hop`'s proven inline structure
-(the `transportEquiv`/`transportRep` def-form refactor made the rewrite
-patterns unmatchable — the let-bound form is what compiles). -/
-lemma hopcHs_of_hhs {A γ : ℝ} {f : (n : ℕ) → Equiv.Perm (Fin n) → ℝ}
+/-- Proposition 2.5, Hilbert–Schmidt form: the same conclusion from a squared
+Hilbert–Schmidt bound `A·D^{−γ}` whenever `1 − rγ < 0`. -/
+theorem fourier_amplification_hs
+    (A γ : ℝ) (hA : 0 < A) (hγ : 0 < γ) (r : ℕ)
+    (hr : (1 : ℝ) - (r : ℝ) * γ < 0)
+    (μ f : (n : ℕ) → Equiv.Perm (Fin n) → ℝ)
+    (hμ : ∀ n, (∀ g, 0 ≤ μ n g) ∧ mass (μ n) = 1)
+    (hf : ∀ n, (∀ g, 0 ≤ f n g) ∧ ∀ g, f n g ≤ μ n g)
+    (hmass : Tendsto (fun n => mass (f n)) atTop (nhds 1))
+    (hsign : Tendsto (fun n => mass (fun g => μ n g *
+      BinaryCoordinateSweeps.realSign g)) atTop (nhds 0))
     (hhs : ∀ n, ∀ (V : Type u) [NormedAddCommGroup V] [InnerProductSpace ℂ V]
         [FiniteDimensional ℂ V] (ρ : Representation ℂ (Equiv.Perm (Fin n)) V),
         Representation.IsIrreducible ρ → IsUnitary ρ → 1 < Module.finrank ℂ V →
-          hsNormSq (complexFourier ρ (fun g => (f n g : ℂ))) ≤
-            A * (Module.finrank ℂ V : ℝ) ^ (-γ))
-    (n : ℕ) (c : IrreducibleIndex (Equiv.Perm (Fin n))) (hc : 1 < irreducibleDegree c) :
-    hsNormSq (V := irreducibleSpace c) (complexFourier (V := irreducibleSpace c)
-        (irreducibleRep c) (fun g => (f n g : ℂ))) ≤
-      A * (irreducibleDegree c : ℝ) ^ (-γ) := by
+          hsNormSq (complexFourier ρ (fun g => (f n g : ℂ)))
+            ≤ A * (Module.finrank ℂ V : ℝ) ^ (-γ)) :
+    Tendsto (fun n => BinaryCoordinateSweeps.totalVariation
+        (BinaryCoordinateSweeps.convolutionPower (μ n) r)
+        (BinaryCoordinateSweeps.uniformLaw (Equiv.Perm (Fin n))))
+      atTop (nhds 0) := by
   classical
-  have hfr : Module.finrank ℂ ↥(irreducibleSpace c) = irreducibleDegree c := rfl
-  let e : ↥(irreducibleSpace c) ≃ₗᵢ[ℂ]
-      EuclideanSpace ℂ (ULift.{u} (Fin (irreducibleDegree c))) :=
-    (stdOrthonormalBasis ℂ ↥(irreducibleSpace c)).repr.trans
-      (LinearIsometryEquiv.piLpCongrLeft 2 ℂ ℂ
-        ((Equiv.cast (congrArg Fin hfr)).trans (Equiv.ulift.{u, 0}.symm)))
-  have hfinW : Module.finrank ℂ (EuclideanSpace ℂ (ULift.{u} (Fin (irreducibleDegree c)))) =
-      irreducibleDegree c := by
-    rw [← hfr]
-    exact e.toLinearEquiv.finrank_eq.symm
-  have hρ'U : IsUnitary (conjRep e.toLinearEquiv (irreducibleRep c)) := by
-    intro g x y
-    rw [conjRep_apply, conjRep_apply]
-    have hsymm : ∀ w : EuclideanSpace ℂ (ULift.{u} (Fin (irreducibleDegree c))),
-        (e.toLinearEquiv).symm w = e.symm w := fun w => rfl
-    rw [LinearIsometryEquiv.coe_toLinearEquiv, hsymm, hsymm]
-    have he : ∀ A B : ↥(irreducibleSpace c), inner ℂ (e A) (e B) = inner ℂ A B := by
-      intro A B
-      rw [Submodule.coe_inner]
-      rw [inner_eq_sum_norm_sq_div_four, inner_eq_sum_norm_sq_div_four]
-      have he_norm : ∀ w : ↥(irreducibleSpace c), ‖e w‖ = ‖w‖ :=
-        fun w => e.toLinearIsometry.norm_map w
-      simp only [← map_add, ← map_sub, ← map_smul, he_norm, ← Submodule.coe_add,
-        ← Submodule.coe_sub, ← Submodule.coe_smul, Submodule.norm_coe]
-    rw [he]
-    rw [irreducibleRep_unitary c g]
-    have heS : ∀ u v : EuclideanSpace ℂ (ULift.{u} (Fin (irreducibleDegree c))),
-        inner ℂ (e.symm u) (e.symm v) = inner ℂ u v := by
-      intro u v
-      rw [Submodule.coe_inner]
-      rw [inner_eq_sum_norm_sq_div_four, inner_eq_sum_norm_sq_div_four]
-      have heS_norm : ∀ w : EuclideanSpace ℂ (ULift.{u} (Fin (irreducibleDegree c))),
-          ‖e.symm w‖ = ‖w‖ := fun w => e.symm.toLinearIsometry.norm_map w
-      simp only [← map_add, ← map_sub, ← map_smul, heS_norm, ← Submodule.coe_add,
-        ← Submodule.coe_sub, ← Submodule.coe_smul, Submodule.norm_coe]
-    exact heS x y
-  have hb := hhs n (EuclideanSpace ℂ (ULift.{u} (Fin (irreducibleDegree c))))
-    (conjRep e.toLinearEquiv (irreducibleRep c))
-    (conjRep_isIrreducible e.toLinearEquiv (irreducibleRep c) inferInstance)
-    hρ'U
-    (by rw [hfinW]; exact hc)
-  rw [hfinW] at hb
-  rw [complexFourier_conjRep e.toLinearEquiv (irreducibleRep c), hsNormSq_conj] at hb
-  exact hb
+  exact tv_tendsto_zero_of_energy r (Eventually.of_forall hμ) (Eventually.of_forall hf) hmass
+    (hs_energy_tendsto_zero (le_refl atTop) hA hγ r hr
+      (Eventually.of_forall hμ) (Eventually.of_forall hf) hmass hsign hhs)
 
-end HSBridge
+end AssemblyProp
 
 end
 end PartialPermutation

@@ -513,3 +513,89 @@ lemma physicalLaw_tv_ge (d : ℕ) (hd : 0 < d) (t : ℕ) :
   exact_mod_cast lawSupport_physicalLaw_le d hd t
 
 end ThorpFourRow
+
+/-! ## Slice G8-γa/γb: the moment trace — diagonal expansion and PSD bound -/
+
+namespace ThorpFourRow
+
+/-- The second-moment operator `T T*` is self-adjoint. -/
+lemma isSelfAdjoint_sweepSecondMoment {d D : ℕ}
+    (ρ : Representation ℂ (Equiv.Perm (Slot d)) (RepSpace D)) :
+    IsSelfAdjoint (sweepSecondMoment ρ) := by
+  classical
+  rw [isSelfAdjoint_iff]
+  unfold sweepSecondMoment
+  simp only []
+  rw [ContinuousLinearMap.star_eq_adjoint, ContinuousLinearMap.adjoint_comp,
+    ContinuousLinearMap.adjoint_adjoint]
+
+/-- The moment trace is the sum of the diagonal entries' real parts. -/
+lemma sweepMomentTrace_eq_sum_re {d D : ℕ}
+    (ρ : Representation ℂ (Equiv.Perm (Slot d)) (RepSpace D)) (r : ℕ) :
+    sweepMomentTrace ρ r =
+      ∑ i : Fin D, Complex.re (inner ℂ (EuclideanSpace.single i (1 : ℂ))
+        (((sweepSecondMoment ρ)^r) (EuclideanSpace.single i (1 : ℂ)))) := by
+  classical
+  unfold sweepMomentTrace
+  simp only []
+  rw [show Matrix.trace (Matrix.of (fun i j => ((sweepSecondMoment ρ)^r)
+        (EuclideanSpace.single i (1 : ℂ)) j)) =
+      ∑ i : Fin D, ((sweepSecondMoment ρ)^r) (EuclideanSpace.single i (1 : ℂ)) i from rfl]
+  rw [Complex.re_sum]
+  apply Finset.sum_congr rfl
+  intro i _
+  congr 1
+  rw [EuclideanSpace.inner_single_left, map_one, one_mul]
+
+/-- For `r = 2k`, each diagonal entry of `B^r` has real part a squared norm. -/
+lemma sweepMomentTrace_entry {d D : ℕ}
+    (ρ : Representation ℂ (Equiv.Perm (Slot d)) (RepSpace D)) {k : ℕ} (e : RepSpace D) :
+    Complex.re (inner ℂ e (((sweepSecondMoment ρ)^(2 * k)) e)) =
+      ‖((sweepSecondMoment ρ)^k) e‖^2 := by
+  classical
+  have hSA : IsSelfAdjoint (sweepSecondMoment ρ) := isSelfAdjoint_sweepSecondMoment ρ
+  have hpow : (sweepSecondMoment ρ)^(2 * k) =
+      star ((sweepSecondMoment ρ)^k) * (sweepSecondMoment ρ)^k := by
+    rw [show (2:ℕ) * k = k + k from two_mul k, pow_add]
+    rw [show star ((sweepSecondMoment ρ)^k) = (sweepSecondMoment ρ)^k from hSA.pow k]
+  rw [hpow, mul_apply_eq_comp, ContinuousLinearMap.star_eq_adjoint,
+    ContinuousLinearMap.adjoint_inner_right]
+  show RCLike.re (inner ℂ (((sweepSecondMoment ρ)^k) e) (((sweepSecondMoment ρ)^k) e)) = _
+  exact inner_self_eq_norm_sq _
+
+/-- The moment trace of an even power `r ≥ 2` is at most `D · ‖B‖^r`. -/
+lemma sweepMomentTrace_le {d D : ℕ}
+    (ρ : Representation ℂ (Equiv.Perm (Slot d)) (RepSpace D)) {r : ℕ} (hr : Even r)
+    (hr0 : 2 ≤ r) :
+    sweepMomentTrace ρ r ≤ (D : ℝ) * ‖sweepSecondMoment ρ‖ ^ r := by
+  classical
+  obtain ⟨k, hk⟩ := hr
+  have hr2 : r = 2 * k := by rw [hk, two_mul]
+  have hk0 : 0 < k := by omega
+  rw [sweepMomentTrace_eq_sum_re]
+  have hper : ∀ i : Fin D, Complex.re (inner ℂ (EuclideanSpace.single i (1 : ℂ))
+        (((sweepSecondMoment ρ)^r) (EuclideanSpace.single i (1 : ℂ)))) ≤
+      ‖sweepSecondMoment ρ‖ ^ r := by
+    intro i
+    rw [hr2, sweepMomentTrace_entry]
+    have hnorm1 : ‖EuclideanSpace.single i (1 : ℂ)‖ = 1 := by
+      rw [show EuclideanSpace.single i (1 : ℂ) = PiLp.single 2 i (1 : ℂ) from rfl]
+      rw [PiLp.norm_single]
+      simp
+    have hle : ‖((sweepSecondMoment ρ)^k) (EuclideanSpace.single i (1 : ℂ))‖ ≤
+        ‖sweepSecondMoment ρ‖ ^ k := by
+      refine (ContinuousLinearMap.le_opNorm _ _).trans ?_
+      rw [hnorm1, mul_one]
+      exact norm_pow_le' _ hk0
+    refine (pow_le_pow_left₀ (norm_nonneg _) hle 2).trans (le_of_eq ?_)
+    rw [← pow_mul, mul_comm k 2, ← hr2]
+  have hsum := Finset.sum_le_card_nsmul Finset.univ _ (‖sweepSecondMoment ρ‖ ^ r)
+    (fun i _ => hper i)
+  rw [Finset.card_univ, Fintype.card_fin, nsmul_eq_mul] at hsum
+  exact hsum
+
+end ThorpFourRow
+
+end
+
+end OAI

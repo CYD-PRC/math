@@ -238,6 +238,278 @@ theorem ThorpFourRow.fourierAt_eq {G : Type*} [Fintype G] [Monoid G] {D : ℕ}
     (p : G → ℝ) (ρ : Representation ℂ G (ThorpFourRow.RepSpace D)) :
     ThorpFourRow.fourierAt p ρ = BinaryCoordinateSweeps.averageOperator p ρ := rfl
 
-end
+/-! ## Slice G8-β: the support lower bound (paper's equation (3))
 
-end OAI
+After `t` physical steps only `2^{t·2^{d-1}}` decks are reachable: each step's
+law is the pushforward of the uniform law on `2^{2^{d-1}}` coins, convolution
+multiplies supports, and a probability law putting mass one on a set `S` stays
+at TV-distance `≥ 1 − |S|/N!` from uniform. All over the challenge's own
+`ThorpFourRow` definitions (ruling G-2); no use of the repository's
+`physicalHistory`. The counting claim is proved, not quoted (ruling G-3). -/
+
+namespace ThorpFourRow
+
+/-- The support of a law, as a finset. -/
+noncomputable def lawSupport {G : Type*} [Fintype G] (p : G → ℝ) : Finset G := by
+  classical
+  exact Finset.univ.filter (fun g => p g ≠ 0)
+
+lemma mem_lawSupport {G : Type*} [Fintype G] (p : G → ℝ) (g : G) :
+    g ∈ lawSupport p ↔ p g ≠ 0 := by
+  classical
+  show g ∈ Finset.univ.filter (fun g => p g ≠ 0) ↔ p g ≠ 0
+  rw [Finset.mem_filter]
+  exact and_iff_right (Finset.mem_univ _)
+
+/-- The support of a pushforward law is contained in the image. -/
+lemma lawSupport_finiteLaw_subset {Ω G : Type*} [Fintype Ω] [Fintype G] [Nonempty Ω]
+    [DecidableEq G]
+    (f : Ω → G) :
+    lawSupport (finiteLaw f) ⊆ Finset.univ.image f := by
+  classical
+  intro g hg
+  rw [mem_lawSupport] at hg
+  by_contra hcon
+  apply hg
+  unfold finiteLaw
+  apply Finset.sum_eq_zero
+  intro ω _
+  split_ifs with hfg
+  · exact absurd (Finset.mem_image.mpr ⟨ω, Finset.mem_univ _, hfg⟩) hcon
+  · rfl
+
+lemma lawSupport_finiteLaw_card_le {Ω G : Type*} [Fintype Ω] [Fintype G] [Nonempty Ω]
+    [DecidableEq G]
+    (f : Ω → G) :
+    (lawSupport (finiteLaw f)).card ≤ Fintype.card Ω := by
+  classical
+  exact (Finset.card_le_card (lawSupport_finiteLaw_subset f)).trans
+    (Finset.card_image_le.trans_eq Finset.card_univ)
+
+/-- The coin space of one physical step has `2^{2^{d-1}}` points. -/
+lemma card_coins (d : ℕ) (_hd : 0 < d) (j : Fin d) :
+    Fintype.card (({i : Fin d // i ≠ j} → Bool) → Bool) = 2 ^ (2 ^ (d - 1)) := by
+  classical
+  have hsub : Fintype.card {i : Fin d // i ≠ j} = d - 1 := by
+    rw [Fintype.card_subtype_compl, Fintype.card_fin, Fintype.card_subtype_eq j]
+  rw [Fintype.card_fun, Fintype.card_fun, Fintype.card_bool, hsub]
+
+/-- One physical step's law has at most `2^{2^{d-1}}`-point support. -/
+lemma lawSupport_stepLaw_le (d : ℕ) (hd : 0 < d) (j : Fin d) :
+    (lawSupport (physicalStepLaw d j)).card ≤ 2 ^ (2 ^ (d - 1)) := by
+  classical
+  exact (lawSupport_finiteLaw_card_le (physicalStep d j)).trans_eq (card_coins d hd j)
+
+/-- Convolution multiplies supports (up to the product image). -/
+lemma lawSupport_convolution_le {G : Type*} [Fintype G] [Group G] [DecidableEq G] (p q : G → ℝ) :
+    (lawSupport (convolution p q)).card ≤ (lawSupport p).card * (lawSupport q).card := by
+  classical
+  refine (Finset.card_le_card ?_).trans ((Finset.card_image_le
+      (s := lawSupport p ×ˢ lawSupport q) (f := fun xy : G × G => xy.1 * xy.2)).trans_eq
+    (Finset.card_product _ _))
+  intro g hg
+  rw [mem_lawSupport] at hg
+  obtain ⟨x, -, hx⟩ := Finset.exists_ne_zero_of_sum_ne_zero hg
+  obtain ⟨hpx, hqx⟩ := mul_ne_zero_iff.mp hx
+  rw [Finset.mem_image]
+  refine ⟨(x, x⁻¹ * g), ?_, ?_⟩
+  · rw [Finset.mem_product, mem_lawSupport, mem_lawSupport]
+    exact ⟨hpx, hqx⟩
+  · show x * (x⁻¹ * g) = g
+    exact mul_inv_cancel_left x g
+
+/-- The support bound after `t` physical steps: at most `2^{t·2^{d-1}}`
+reachable decks. -/
+lemma lawSupport_physicalLaw_le (d : ℕ) (hd : 0 < d) (t : ℕ) :
+    (lawSupport (physicalLaw d hd t)).card ≤ 2 ^ (t * 2 ^ (d - 1)) := by
+  classical
+  induction t with
+  | zero =>
+    show (lawSupport pointMassOne).card ≤ 2 ^ (0 * 2 ^ (d - 1))
+    rw [Nat.zero_mul, pow_zero]
+    refine (Finset.card_le_card ?_).trans
+      (le_of_eq (Finset.card_singleton (1 : Equiv.Perm (Slot d))))
+    intro g hg
+    rw [mem_lawSupport] at hg
+    rw [Finset.mem_singleton]
+    by_contra hg1
+    apply hg
+    show pointMassOne g = 0
+    unfold pointMassOne
+    exact ite_eq_right hg1
+  | succ t ih =>
+    have hstep : physicalLaw d hd (t + 1) =
+        convolution (physicalLaw d hd t) (physicalStepLaw d ⟨t % d, Nat.mod_lt _ hd⟩) := by
+      unfold physicalLaw
+      rw [List.range_succ, List.foldl_concat]
+    rw [hstep]
+    refine (lawSupport_convolution_le _ _).trans ?_
+    calc (lawSupport (physicalLaw d hd t)).card *
+            (lawSupport (physicalStepLaw d ⟨t % d, Nat.mod_lt _ hd⟩)).card
+        ≤ (2 ^ (t * 2 ^ (d - 1))) * 2 ^ (2 ^ (d - 1)) :=
+          mul_le_mul ih (lawSupport_stepLaw_le d hd _) (Nat.zero_le _) (Nat.zero_le _)
+      _ = 2 ^ ((t + 1) * 2 ^ (d - 1)) := by
+          rw [Nat.succ_mul, ← pow_add]
+
+/-- The mass of a convolution is the product of the masses. -/
+lemma mass_convolution {G : Type*} [Fintype G] [Group G] (p q : G → ℝ) :
+    (∑ g : G, convolution p q g) = (∑ g, p g) * (∑ g, q g) := by
+  classical
+  show (∑ g, ∑ x, p x * q (x⁻¹ * g)) = (∑ x, p x) * ∑ x, q x
+  rw [Finset.sum_comm, Finset.sum_mul]
+  apply Finset.sum_congr rfl
+  intro x _
+  rw [← Finset.mul_sum]
+  apply congrArg (p x * ·)
+  exact Equiv.sum_comp (Equiv.mulLeft x⁻¹) (fun g' => q g')
+
+/-- The mass of the point mass at one is one. -/
+lemma mass_pointMassOne {G : Type*} [Fintype G] [Group G] :
+    (∑ g : G, pointMassOne g) = 1 := by
+  classical
+  show (∑ g : G, (if g = 1 then (1:ℝ) else 0)) = 1
+  rw [Finset.sum_ite_eq' Finset.univ 1 (fun _ => (1:ℝ))]
+  simp
+
+/-- The mass of a pushforward of the uniform law is one. -/
+lemma mass_finiteLaw {Ω G : Type*} [Fintype Ω] [Fintype G] [Nonempty Ω] (f : Ω → G) :
+    (∑ g : G, finiteLaw f g) = 1 := by
+  classical
+  have hpt : ∀ g : G, finiteLaw f g = ((Finset.univ.filter (fun ω => f ω = g)).card : ℝ) *
+      (Fintype.card Ω : ℝ)⁻¹ := by
+    intro g
+    show finiteLaw f g = _
+    unfold finiteLaw
+    rw [← Finset.sum_filter, Finset.sum_const, nsmul_eq_mul]
+  calc (∑ g : G, finiteLaw f g)
+      = ∑ g : G, ((Finset.univ.filter (fun ω => f ω = g)).card : ℝ) *
+          (Fintype.card Ω : ℝ)⁻¹ := Finset.sum_congr rfl (fun g _ => hpt g)
+    _ = (∑ g : G, ((Finset.univ.filter (fun ω => f ω = g)).card : ℝ)) *
+          (Fintype.card Ω : ℝ)⁻¹ := (Finset.sum_mul _ _ _).symm
+    _ = (Fintype.card Ω : ℝ) * (Fintype.card Ω : ℝ)⁻¹ := by
+        congr 1
+        have h := Finset.card_eq_sum_card_fiberwise (t := (Finset.univ : Finset G))
+          (s := (Finset.univ : Finset Ω)) (f := f) (fun ω _ => Finset.mem_univ (f ω))
+        rw [Finset.card_univ] at h
+        exact_mod_cast h.symm
+    _ = 1 := mul_inv_cancel₀ (Nat.cast_ne_zero.mpr Fintype.card_ne_zero)
+
+/-- The physical law after any number of steps is a probability (mass one). -/
+lemma mass_physicalLaw (d : ℕ) (hd : 0 < d) (t : ℕ) :
+    (∑ g : Equiv.Perm (Slot d), physicalLaw d hd t g) = 1 := by
+  classical
+  induction t with
+  | zero =>
+    show (∑ g : Equiv.Perm (Slot d), pointMassOne g) = 1
+    exact mass_pointMassOne
+  | succ t ih =>
+    have hstep : physicalLaw d hd (t + 1) =
+        convolution (physicalLaw d hd t) (physicalStepLaw d ⟨t % d, Nat.mod_lt _ hd⟩) := by
+      unfold physicalLaw
+      rw [List.range_succ, List.foldl_concat]
+    rw [hstep]
+    show (∑ g : Equiv.Perm (Slot d), convolution _ _ g) = 1
+    rw [mass_convolution, ih]
+    show (1:ℝ) * (∑ g : Equiv.Perm (Slot d),
+        finiteLaw (physicalStep d ⟨t % d, Nat.mod_lt _ hd⟩) g) = 1
+    rw [mass_finiteLaw, mul_one]
+
+/-- The physical law is pointwise nonnegative. -/
+lemma physicalLaw_nonneg (d : ℕ) (hd : 0 < d) (t : ℕ) :
+    ∀ g : Equiv.Perm (Slot d), 0 ≤ physicalLaw d hd t g := by
+  classical
+  induction t with
+  | zero =>
+    intro g
+    show 0 ≤ pointMassOne g
+    unfold pointMassOne
+    split_ifs <;> norm_num
+  | succ t ih =>
+    have hstep : physicalLaw d hd (t + 1) =
+        convolution (physicalLaw d hd t) (physicalStepLaw d ⟨t % d, Nat.mod_lt _ hd⟩) := by
+      unfold physicalLaw
+      rw [List.range_succ, List.foldl_concat]
+    intro g
+    rw [hstep]
+    show 0 ≤ ∑ x, (physicalLaw d hd t) x * (physicalStepLaw d ⟨t % d, Nat.mod_lt _ hd⟩) (x⁻¹ * g)
+    apply Finset.sum_nonneg
+    intro x _
+    apply mul_nonneg (ih x)
+    show 0 ≤ finiteLaw (physicalStep d ⟨t % d, Nat.mod_lt _ hd⟩) (x⁻¹ * g)
+    unfold finiteLaw
+    apply Finset.sum_nonneg
+    intro ω _
+    split_ifs <;> positivity
+
+/-- A probability law putting mass one on a set `S` stays at TV-distance
+`≥ 1 − |S|/|G|` from uniform. -/
+lemma one_sub_card_support_le_tv {G : Type*} [Fintype G] [Nonempty G] (p : G → ℝ)
+    (hm : (∑ g : G, p g) = 1) :
+    1 - (lawSupport p).card / (Fintype.card G : ℝ) ≤
+      totalVariation p (uniformLaw G) := by
+  classical
+  have hG0 : (0:ℝ) < Fintype.card G := Nat.cast_pos.mpr Fintype.card_pos
+  set S := lawSupport p with hS
+  set c := (Fintype.card G : ℝ) with hc
+  have hU : ∀ g : G, uniformLaw G g = c⁻¹ := fun g => rfl
+  have hsc : (∑ g ∈ S, p g) = 1 := by
+    rw [← hm]
+    apply Finset.sum_subset (Finset.subset_univ _)
+    intro x _ hxS
+    by_contra hne
+    exact hxS (by rw [hS]; exact (mem_lawSupport p x).mpr hne)
+  have hSbound : 1 - (S.card : ℝ) / c ≤ ∑ g ∈ S, |p g - uniformLaw G g| := by
+    calc ∑ g ∈ S, |p g - uniformLaw G g|
+        ≥ ∑ g ∈ S, (p g - c⁻¹) := by
+          apply Finset.sum_le_sum
+          intro g _
+          rw [hU g]
+          exact le_abs_self _
+      _ = 1 - (S.card : ℝ) / c := by
+          rw [Finset.sum_sub_distrib, hsc, Finset.sum_const, nsmul_eq_mul, div_eq_mul_inv]
+  have hScbound : (∑ g ∈ Sᶜ, |p g - uniformLaw G g|) = (Sᶜ.card : ℝ) / c := by
+    rw [div_eq_mul_inv, ← nsmul_eq_mul, ← Finset.sum_const]
+    apply Finset.sum_congr rfl
+    intro g hg
+    rw [Finset.mem_compl] at hg
+    have hpg : p g = 0 := by
+      by_contra hne
+      exact hg (by rw [hS]; exact (mem_lawSupport p g).mpr hne)
+    rw [hU g, hpg, zero_sub, abs_neg, abs_of_pos (inv_pos.mpr hG0)]
+  have hsum : (∑ g : G, |p g - uniformLaw G g|) =
+      (∑ g ∈ S, |p g - uniformLaw G g|) + (∑ g ∈ Sᶜ, |p g - uniformLaw G g|) := by
+    rw [← Finset.sum_add_sum_compl S]
+  have hle : S.card ≤ Fintype.card G := by
+    rw [hS]
+    exact (Finset.card_filter_le _ _).trans_eq Finset.card_univ
+  have hcard : (Sᶜ.card : ℝ) = c - (S.card : ℝ) := by
+    rw [Finset.card_compl, Nat.cast_sub hle, ← hc]
+  have halg : (1:ℝ) - (S.card : ℝ) / c =
+      (1 / ((2:ℕ):ℝ)) * ((1 - (S.card : ℝ) / c) + (Sᶜ.card : ℝ) / c) := by
+    rw [hcard]
+    field_simp [hG0.ne']
+    ring
+  unfold totalVariation
+  rw [hsum, halg]
+  apply mul_le_mul_of_nonneg_left _ (by norm_num)
+  exact add_le_add hSbound hScbound.ge
+
+/-- Paper's equation (3): the support lower bound. After `t` physical steps
+the distance to uniform is at least `1 − 2^{t·2^{d−1}}/N!`. -/
+lemma physicalLaw_tv_ge (d : ℕ) (hd : 0 < d) (t : ℕ) :
+    1 - (2 : ℝ) ^ (t * 2 ^ (d - 1)) / (Nat.factorial (2 ^ d) : ℝ) ≤
+      totalVariation (physicalLaw d hd t) (uniformLaw (Equiv.Perm (Slot d))) := by
+  classical
+  have hbase := one_sub_card_support_le_tv (physicalLaw d hd t)
+    (mass_physicalLaw d hd t)
+  have hcard : (Fintype.card (Equiv.Perm (Slot d)) : ℝ) = (Nat.factorial (2 ^ d) : ℝ) := by
+    have hslot : Fintype.card (Slot d) = 2 ^ d := by
+      show Fintype.card (Fin d → Bool) = 2 ^ d
+      rw [Fintype.card_fun, Fintype.card_bool, Fintype.card_fin]
+    rw [Fintype.card_perm, hslot]
+  rw [← hcard]
+  refine (sub_le_sub_left ?_ (1 : ℝ)).trans hbase
+  apply div_le_div_of_nonneg_right _ (Nat.cast_nonneg _)
+  exact_mod_cast lawSupport_physicalLaw_le d hd t
+
+end ThorpFourRow

@@ -2478,6 +2478,310 @@ theorem exists_trimmed_subprobability {ι : Type*} [Fintype ι] [Nonempty ι]
 
 end Trimming
 
+/-! ## Slice 4c-γ: selecting one partition (paper Lemma 2.2)
+
+Every block of a uniformly chosen ordered equal partition is a uniform
+`n/8`-subset; hence the average over ordered partitions of the summed
+marginal error is `8 ×` the average over subsets, and some partition attains
+at most that. All counting is by symmetry (permutation transport of
+partitions) and fiberwise sums — no probability spaces. -/
+
+section PartitionSelection
+
+open scoped Classical
+
+/-- Ordered equal partitions of `Fin n` into `b` blocks, carried as finsets. -/
+def ordEqualPartitions (n b : ℕ) : Type := {M : Fin b → Finset (Fin n) //
+  (∀ i, (M i).card = n / b) ∧ Pairwise (Function.onFun Disjoint M)}
+
+noncomputable instance (n b : ℕ) : Fintype (ordEqualPartitions n b) := by
+  classical
+  show Fintype {M : Fin b → Finset (Fin n) //
+    (∀ i, (M i).card = n / b) ∧ Pairwise (Function.onFun Disjoint M)}
+  infer_instance
+
+/-- The marginal TV error of a subset (the summand of `avgMarginalTV`). -/
+noncomputable def marginalErr (μ : Equiv.Perm (Fin n) → ℝ) (M : Finset (Fin n)) : ℝ :=
+  BinaryCoordinateSweeps.totalVariation (cosetMassLaw μ (blockSubgroup (M : Set (Fin n))))
+    (BinaryCoordinateSweeps.uniformLaw _)
+
+/-- `avgMarginalTV` is the plain average of `marginalErr` over the
+`n/8`-subsets. -/
+lemma avgMarginalTV_eq (μ : (n : ℕ) → Equiv.Perm (Fin n) → ℝ) (n : ℕ) :
+    avgMarginalTV μ n =
+      (∑ M : {M : Finset (Fin n) // M.card = n / 8}, marginalErr (μ n) M.1) /
+        (Fintype.card {M : Finset (Fin n) // M.card = n / 8} : ℝ) := rfl
+
+/-- The non-membership subtype is the complement finset's subtype. -/
+def notMemEquivCompl {m : ℕ} (M : Finset (Fin m)) : {a : Fin m // a ∉ M} ≃ ↥(Mᶜ) :=
+  Equiv.subtypeEquivRight (fun _ => Finset.mem_compl.symm)
+
+/-- A permutation of `Fin m` carrying one finset onto another of the same
+cardinality (via `sumCompl` gluing of a block equivalence and a complement
+equivalence). -/
+lemma exists_perm_map_finset {m : ℕ} {M₀ M₁ : Finset (Fin m)} (h : M₀.card = M₁.card) :
+    ∃ σ : Equiv.Perm (Fin m), M₀.map σ.toEmbedding = M₁ := by
+  classical
+  have hC : Fintype.card ↥M₀ = Fintype.card ↥M₁ := by
+    rw [Fintype.card_coe, Fintype.card_coe]
+    exact h
+  obtain ⟨e₁⟩ := Fintype.card_eq.mp hC
+  have key : ∀ M : Finset (Fin m), Fintype.card {a : Fin m // a ∉ M} = m - M.card := by
+    intro M
+    calc Fintype.card {a : Fin m // a ∉ M} = Fintype.card ↥(Mᶜ) :=
+          Fintype.card_congr (notMemEquivCompl M)
+      _ = (Mᶜ).card := Fintype.card_coe _
+      _ = m - M.card := by rw [Finset.card_compl, Fintype.card_fin]
+  obtain ⟨e₂⟩ := Fintype.card_eq.mp (show
+      Fintype.card {a : Fin m // a ∉ M₀} = Fintype.card {a : Fin m // a ∉ M₁} by
+    rw [key M₀, key M₁, h])
+  set σ : Equiv.Perm (Fin m) := (Equiv.sumCompl (· ∈ M₀)).symm.trans
+    ((e₁.sumCongr e₂).trans (Equiv.sumCompl (· ∈ M₁))) with hσ
+  refine ⟨σ, ?_⟩
+  apply Finset.eq_of_subset_of_card_le
+  · intro x hx
+    obtain ⟨y, hy, hyx⟩ := Finset.mem_map.mp hx
+    rw [← hyx]
+    show σ y ∈ M₁
+    have hσy : σ y = (e₁ ⟨y, hy⟩ : Fin m) := by
+      rw [hσ]
+      simp only [Equiv.trans_apply, Equiv.sumCompl_symm_apply_of_pos hy]
+      rw [show (e₁.sumCongr e₂) (Sum.inl ⟨y, hy⟩) = Sum.inl (e₁ ⟨y, hy⟩) from rfl]
+      exact Equiv.sumCompl_apply_inl _
+    rw [hσy]
+    exact (e₁ ⟨y, hy⟩).2
+  · rw [Finset.card_map]
+    exact h.symm.le
+
+/-- An ordered equal partition exists whenever `8 ∣ n`. -/
+lemma ordEqualPartitions_nonempty {n : ℕ} (h8 : 8 ∣ n) :
+    Nonempty (ordEqualPartitions n 8) := by
+  classical
+  have hcard : Fintype.card (Fin n) = Fintype.card (Fin 8 × Fin (n / 8)) := by
+    rw [Fintype.card_fin, Fintype.card_prod, Fintype.card_fin, Fintype.card_fin,
+      Nat.mul_div_cancel' h8]
+  obtain ⟨e⟩ := Fintype.card_eq.mp hcard
+  have hinj : ∀ i : Fin 8, Function.Injective (fun k : Fin (n / 8) => e.symm (i, k)) := by
+    intro i a b hab
+    exact (Prod.mk.inj (e.symm.injective hab)).2
+  refine ⟨⟨fun i => Finset.univ.image (fun k : Fin (n / 8) => e.symm (i, k)), fun i => ?_, ?_⟩⟩
+  · rw [Finset.card_image_of_injective _ (hinj i), Finset.card_univ, Fintype.card_fin]
+  · intro i j hij
+    show Disjoint (Finset.univ.image (fun k => e.symm (i, k)))
+      (Finset.univ.image (fun k => e.symm (j, k)))
+    rw [Finset.disjoint_left]
+    intro x hx1 hx2
+    rw [Finset.mem_image] at hx1 hx2
+    obtain ⟨k₁, -, hk₁⟩ := hx1
+    obtain ⟨k₂, -, hk₂⟩ := hx2
+    have hcon : (i, k₁) = (j, k₂) := e.symm.injective (hk₁.trans hk₂.symm)
+    exact hij (Prod.mk.inj hcon).1
+
+/-- The `i`-th block of an ordered equal partition, as an `n/8`-subset. -/
+def evalPart {n : ℕ} (i : Fin 8) (P : ordEqualPartitions n 8) :
+    {M : Finset (Fin n) // M.card = n / 8} :=
+  ⟨P.1 i, P.2.1 i⟩
+
+/-- Transport of ordered equal partitions along a permutation of the
+underlying set. -/
+def transportPart {n b : ℕ} (σ : Equiv.Perm (Fin n)) (P : ordEqualPartitions n b) :
+    ordEqualPartitions n b := by
+  classical
+  refine ⟨fun i => (P.1 i).map σ.toEmbedding, fun i => ?_, fun i j hij => ?_⟩
+  · rw [Finset.card_map]
+    exact P.2.1 i
+  · exact (Finset.disjoint_map _).mpr (P.2.2 hij)
+
+/-- Transport by `σ.symm` undoes transport by `σ`. -/
+lemma transportPart_symm_left_inv {n b : ℕ} (σ : Equiv.Perm (Fin n))
+    (P : ordEqualPartitions n b) :
+    transportPart σ.symm (transportPart σ P) = P := by
+  apply Subtype.ext
+  funext i
+  show ((P.1 i).map σ.toEmbedding).map σ.symm.toEmbedding = P.1 i
+  rw [Finset.map_map]
+  have hid : σ.toEmbedding.trans σ.symm.toEmbedding = Function.Embedding.refl (Fin n) :=
+    Function.Embedding.ext (fun x => Equiv.symm_apply_apply σ x)
+  rw [hid, Finset.map_refl]
+
+/-- Transport as an equivalence of the partition type. -/
+def transportPartEquiv {n b : ℕ} (σ : Equiv.Perm (Fin n)) :
+    ordEqualPartitions n b ≃ ordEqualPartitions n b :=
+  ⟨transportPart σ, transportPart σ.symm, transportPart_symm_left_inv σ,
+    fun P => transportPart_symm_left_inv σ.symm P⟩
+
+/-- Reindexing of ordered equal partitions along a permutation of the block
+index set. -/
+def reindexPartEquiv {n : ℕ} (τ : Equiv.Perm (Fin 8)) :
+    ordEqualPartitions n 8 ≃ ordEqualPartitions n 8 := by
+  refine ⟨fun P => ⟨fun i => P.1 (τ i), fun i => P.2.1 (τ i), fun i j hij =>
+      P.2.2 (τ.injective.ne hij)⟩,
+    fun P => ⟨fun i => P.1 (τ.symm i), fun i => P.2.1 (τ.symm i), fun i j hij =>
+      P.2.2 (τ.symm.injective.ne hij)⟩, ?_, ?_⟩
+  · intro P
+    apply Subtype.ext
+    funext i
+    show P.1 (τ (τ.symm i)) = P.1 i
+    rw [Equiv.apply_symm_apply]
+  · intro P
+    apply Subtype.ext
+    funext i
+    show P.1 (τ.symm (τ i)) = P.1 i
+    rw [Equiv.symm_apply_apply]
+
+/-- Block evaluation of a transported partition. -/
+lemma evalPart_transport {n : ℕ} (i : Fin 8) (σ : Equiv.Perm (Fin n))
+    (P : ordEqualPartitions n 8) :
+    evalPart i (transportPartEquiv σ P) =
+      ⟨(P.1 i).map σ.toEmbedding, by rw [Finset.card_map]; exact P.2.1 i⟩ := rfl
+
+/-- Block evaluation of a reindexed partition along a swap. -/
+lemma evalPart_reindex_swap {n : ℕ} (i j : Fin 8) (P : ordEqualPartitions n 8) :
+    evalPart j (reindexPartEquiv (Equiv.swap i j) P) = evalPart i P := by
+  apply Subtype.ext
+  show P.1 (Equiv.swap i j j) = P.1 i
+  rw [Equiv.swap_apply_right]
+
+/-- Fibers of block evaluation have constant cardinality: content transport
+(fixed index). -/
+lemma fiber_card_const_content {n : ℕ} (i : Fin 8)
+    (M₀ M₁ : {M : Finset (Fin n) // M.card = n / 8}) :
+    Fintype.card {P : ordEqualPartitions n 8 // evalPart i P = M₀} =
+      Fintype.card {P : ordEqualPartitions n 8 // evalPart i P = M₁} := by
+  classical
+  obtain ⟨σ, hσ⟩ := exists_perm_map_finset (M₀ := M₀.1) (M₁ := M₁.1) (by rw [M₀.2, M₁.2])
+  apply Fintype.card_congr
+  refine Equiv.subtypeEquiv (transportPartEquiv σ) (fun P => ?_)
+  constructor
+  · intro h
+    apply Subtype.ext
+    show (P.1 i).map σ.toEmbedding = M₁.1
+    have hval : P.1 i = M₀.1 := congrArg Subtype.val h
+    rw [← hσ, hval]
+  · intro h
+    apply Subtype.ext
+    show P.1 i = M₀.1
+    have hval0 : (evalPart i (transportPartEquiv σ P)).1 = M₁.1 := congrArg Subtype.val h
+    have hval : (P.1 i).map σ.toEmbedding = M₁.1 := hval0
+    rw [← hσ] at hval
+    exact Finset.map_injective _ hval
+
+/-- Fibers of block evaluation have constant cardinality: index transport
+(fixed subset). -/
+lemma fiber_card_const_index {n : ℕ} (i j : Fin 8)
+    (M : {M : Finset (Fin n) // M.card = n / 8}) :
+    Fintype.card {P : ordEqualPartitions n 8 // evalPart i P = M} =
+      Fintype.card {P : ordEqualPartitions n 8 // evalPart j P = M} := by
+  classical
+  apply Fintype.card_congr
+  refine Equiv.subtypeEquiv (reindexPartEquiv (Equiv.swap i j)) (fun P => ?_)
+  constructor
+  · intro h
+    rw [evalPart_reindex_swap]
+    exact h
+  · intro h
+    rw [evalPart_reindex_swap] at h
+    exact h
+
+/-- All fibers of block evaluation share one cardinality. -/
+lemma fiber_card_const {n : ℕ} (i : Fin 8)
+    (M Mref : {M : Finset (Fin n) // M.card = n / 8}) :
+    Fintype.card {P : ordEqualPartitions n 8 // evalPart i P = M} =
+      Fintype.card {P : ordEqualPartitions n 8 // evalPart 0 P = Mref} :=
+  (fiber_card_const_index i 0 M).trans (fiber_card_const_content 0 M Mref)
+
+/-- The per-index double count: summing a subset function over block `i` of
+all ordered equal partitions equals the common fiber cardinality times the
+total over subsets (paper Lemma 2.2's "every block is a uniform subset"). -/
+lemma sum_eval_eq {n : ℕ} (i : Fin 8)
+    (w : {M : Finset (Fin n) // M.card = n / 8} → ℝ) (N₁ : ℕ)
+    (hN₁ : ∀ M : {M : Finset (Fin n) // M.card = n / 8},
+      Fintype.card {P : ordEqualPartitions n 8 // evalPart i P = M} = N₁) :
+    ∑ P : ordEqualPartitions n 8, w (evalPart i P) =
+      (N₁ : ℝ) * ∑ M : {M : Finset (Fin n) // M.card = n / 8}, w M := by
+  classical
+  calc ∑ P : ordEqualPartitions n 8, w (evalPart i P)
+      = ∑ M : {M : Finset (Fin n) // M.card = n / 8},
+          ∑ P : {P : ordEqualPartitions n 8 // evalPart i P = M}, w (evalPart i P.1) :=
+        (Fintype.sum_fiberwise (evalPart i) (fun P => w (evalPart i P))).symm
+    _ = ∑ M : {M : Finset (Fin n) // M.card = n / 8}, (N₁ : ℝ) * w M := by
+        apply Finset.sum_congr rfl
+        intro M _
+        have hconst : ∀ P : {P : ordEqualPartitions n 8 // evalPart i P = M},
+            w (evalPart i P.1) = w M := fun P => congrArg w P.2
+        rw [Finset.sum_congr rfl (fun P _ => hconst P), Finset.sum_const, Finset.card_univ,
+          hN₁ M, nsmul_eq_mul]
+    _ = (N₁ : ℝ) * ∑ M : {M : Finset (Fin n) // M.card = n / 8}, w M :=
+        (Finset.mul_sum _ _ _).symm
+
+/-- Lemma 2.2 (selecting one partition): some ordered equal partition has
+summed marginal error at most `8 × avgMarginalTV`. -/
+lemma exists_partition_avgMarginal_le (μF : (n : ℕ) → Equiv.Perm (Fin n) → ℝ)
+    (n : ℕ) (h8 : 8 ∣ n) :
+    ∃ M : Fin 8 → Finset (Fin n), (∀ i, (M i).card = n / 8) ∧
+      Pairwise (Function.onFun Disjoint M) ∧
+      (∑ i, marginalErr (μF n) (M i)) ≤ 8 * avgMarginalTV μF n := by
+  classical
+  have hSub : Nonempty {M : Finset (Fin n) // M.card = n / 8} := by
+    have hex : ∃ M ⊆ (Finset.univ : Finset (Fin n)), M.card = n / 8 :=
+      Finset.exists_subset_card_eq (s := (Finset.univ : Finset (Fin n))) (n := n / 8)
+        (by rw [Finset.card_univ, Fintype.card_fin]; exact Nat.div_le_self _ _)
+    obtain ⟨M, -, hM⟩ := hex
+    exact ⟨M, hM⟩
+  obtain ⟨Mref⟩ := hSub
+  set N₁ := Fintype.card {P : ordEqualPartitions n 8 // evalPart 0 P = Mref}
+    with hN₁def
+  have hN₁ : ∀ (i : Fin 8) (M : {M : Finset (Fin n) // M.card = n / 8}),
+      Fintype.card {P : ordEqualPartitions n 8 // evalPart i P = M} = N₁ :=
+    fun i M => fiber_card_const i M Mref
+  have hN₁pos : 0 < N₁ := by
+    obtain ⟨Q⟩ := ordEqualPartitions_nonempty h8
+    obtain ⟨σ, hσ⟩ := exists_perm_map_finset (M₀ := Q.1 0) (M₁ := Mref.1) (by
+      rw [Q.2.1 0, Mref.2])
+    have hmem : evalPart 0 (transportPartEquiv σ Q) = Mref := by
+      apply Subtype.ext
+      show (Q.1 0).map σ.toEmbedding = Mref.1
+      exact hσ
+    rw [hN₁def, Fintype.card_pos_iff]
+    exact ⟨⟨_, hmem⟩⟩
+  have hN₂ : 0 < Fintype.card {M : Finset (Fin n) // M.card = n / 8} := by
+    rw [Fintype.card_pos_iff]
+    exact ⟨Mref⟩
+  have hN₂' : (Fintype.card {M : Finset (Fin n) // M.card = n / 8} : ℝ) ≠ 0 :=
+    Nat.cast_ne_zero.mpr (by omega)
+  have hdouble : ∀ i : Fin 8, ∑ P : ordEqualPartitions n 8, marginalErr (μF n) (P.1 i) =
+      (N₁ : ℝ) * ∑ M : {M : Finset (Fin n) // M.card = n / 8}, marginalErr (μF n) M.1 :=
+    fun i => sum_eval_eq i (fun M => marginalErr (μF n) M.1) N₁ (fun M => hN₁ i M)
+  have hcard : (Fintype.card (ordEqualPartitions n 8) : ℝ) =
+      (N₁ : ℝ) * Fintype.card {M : Finset (Fin n) // M.card = n / 8} := by
+    have h1 := sum_eval_eq 0 (fun _ => (1 : ℝ)) N₁ (fun M => hN₁ 0 M)
+    simpa [Finset.sum_const, Finset.card_univ, nsmul_eq_mul] using h1
+  have hsum : ∑ P : ordEqualPartitions n 8, ∑ i : Fin 8, marginalErr (μF n) (P.1 i) =
+      8 * (N₁ : ℝ) * ∑ M : {M : Finset (Fin n) // M.card = n / 8},
+        marginalErr (μF n) M.1 := by
+    rw [Finset.sum_comm]
+    rw [Finset.sum_congr rfl (fun i _ => hdouble i)]
+    rw [Finset.sum_const, Finset.card_fin, nsmul_eq_mul]
+    push_cast
+    ring
+  obtain ⟨P, -, hP⟩ := Finset.exists_le_of_sum_le (s := (Finset.univ :
+      Finset (ordEqualPartitions n 8)))
+    (f := fun P => ∑ i : Fin 8, marginalErr (μF n) (P.1 i))
+    (g := fun _ => 8 * avgMarginalTV μF n)
+    (@Finset.univ_nonempty _ _ (ordEqualPartitions_nonempty h8)) (by
+      have heq : (∑ P : ordEqualPartitions n 8, ∑ i : Fin 8, marginalErr (μF n) (P.1 i))
+          = ∑ P : ordEqualPartitions n 8, (8 * avgMarginalTV μF n) := by
+        calc ∑ P : ordEqualPartitions n 8, ∑ i : Fin 8, marginalErr (μF n) (P.1 i)
+            = 8 * (N₁:ℝ) * ∑ M : {M : Finset (Fin n) // M.card = n / 8},
+                marginalErr (μF n) M.1 := hsum
+          _ = ∑ P : ordEqualPartitions n 8, (8 * avgMarginalTV μF n) := by
+              rw [Finset.sum_const, Finset.card_univ, nsmul_eq_mul, avgMarginalTV_eq, hcard]
+              field_simp [hN₂']
+      exact heq.le)
+  exact ⟨P.1, P.2.1, P.2.2, hP⟩
+
+end PartitionSelection
+
 end
 end PartialPermutation
 

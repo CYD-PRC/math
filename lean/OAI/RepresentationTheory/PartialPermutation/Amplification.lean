@@ -2102,6 +2102,382 @@ theorem fourier_amplification_hs
 
 end AssemblyProp
 
+/-! ## Slice 4c (corollary infrastructure): challenge-side definitions
+
+Verbatim copies of the challenge file's local definitions
+(`ComparatorChallenges/PartialPermutationConvergence.lean`), so the two
+corollary theorems below are stated over the repository's own objects — the
+G7 convention (the challenge carries the same copies; the comparator loads
+the two environments separately). -/
+
+section CorollaryInfrastructure
+
+open Filter
+
+/-- The left-coset mass law of `μ` along `H`, as a function on `G ⧸ H`
+(the quotient by `QuotientGroup.leftRel H`; classes are the left cosets
+`gH`). This is the paper's `µ_H` on `G/H`. -/
+def cosetMassLaw {G : Type*} [Group G] [Fintype G] (μ : G → ℝ) (H : Subgroup G) :
+    G ⧸ H → ℝ := by
+  classical
+  refine Quotient.lift (fun g => ∑ h : H, μ (g * h)) ?_
+  intro a b hab
+  have hab2 : a⁻¹ * b ∈ H := (QuotientGroup.leftRel_apply).mp hab
+  refine Fintype.sum_equiv (Equiv.mulLeft ⟨(a⁻¹ * b)⁻¹, inv_mem hab2⟩) _ _ ?_
+  intro h
+  apply congrArg μ
+  show (a : G) * (h : G) = b * (((⟨(a⁻¹ * b)⁻¹, inv_mem hab2⟩ : H) * h : H) : G)
+  simp only [Subgroup.coe_mul]
+  group
+
+/-- The uniform average, over the `n/8`-subsets `M` of `Fin n`, of the
+marginal TV of `μ n` along the block subgroup `Sym(M)` (the permutations
+fixing the complement of `M` pointwise — the repository's `blockSubgroup`). -/
+def avgMarginalTV (μ : (n : ℕ) → Equiv.Perm (Fin n) → ℝ) (n : ℕ) : ℝ := by
+  classical
+  exact (∑ M : {M : Finset (Fin n) // M.card = n / 8},
+      BinaryCoordinateSweeps.totalVariation
+        (cosetMassLaw (μ n) (blockSubgroup (M.1 : Set (Fin n))))
+        (BinaryCoordinateSweeps.uniformLaw _)) /
+    (Fintype.card {M : Finset (Fin n) // M.card = n / 8} : ℝ)
+
+/-- The filter `n → ∞` through multiples of eight (the paper's time
+convention for the convergence corollaries). -/
+def eightDivisible : Filter ℕ := Filter.atTop ⊓ Filter.principal {n | 8 ∣ n}
+
+/-- The filter is nontrivial — the convergence statements are not vacuous. -/
+theorem eightDivisible_neBot : eightDivisible.NeBot := by
+  rw [eightDivisible, Filter.inf_principal_neBot_iff]
+  intro U hU
+  obtain ⟨N, hN⟩ := Filter.mem_atTop_sets.mp hU
+  exact ⟨8 * N, hN (8 * N) (by omega), dvd_mul_right 8 N⟩
+
+end CorollaryInfrastructure
+
+/-! ## Slice 4c-β: trimming (paper Lemma 2.3)
+
+Per coset system, scale every over-cap left coset down to the uniform mass
+`1/[G:H]`; across the (finitely many) systems, take the pointwise minimum.
+The mass lost to system `i` is exactly `‖µ_{Hᵢ} − U‖TV` — the positive-part
+form of total variation for equal-mass functions. -/
+
+section Trimming
+
+open scoped Classical
+
+variable {G : Type*} [Group G] [Fintype G]
+
+/-- The mass of the uniform law is one. -/
+lemma mass_uniformLaw {α : Type*} [Fintype α] [Nonempty α] :
+    mass (BinaryCoordinateSweeps.uniformLaw α) = 1 := by
+  show (∑ _ : α, (Fintype.card α : ℝ)⁻¹) = 1
+  rw [Finset.sum_const, Finset.card_univ, nsmul_eq_mul,
+    mul_inv_cancel₀ (Nat.cast_ne_zero.mpr Fintype.card_ne_zero)]
+
+/-- Total variation between equal-mass functions is the summed positive part. -/
+lemma totalVariation_eq_sum_posPart {α : Type*} [Fintype α] (p q : α → ℝ)
+    (h : mass p = mass q) :
+    BinaryCoordinateSweeps.totalVariation p q = ∑ a, max (p a - q a) 0 := by
+  have hmax : ∀ x : ℝ, |x| = max x 0 + max (-x) 0 := by
+    intro x
+    rcases le_or_gt 0 x with hx | hx
+    · rw [abs_of_nonneg hx, max_eq_left hx, max_eq_right (show (-x) ≤ 0 by linarith)]
+      ring
+    · rw [abs_of_neg hx, max_eq_right (show x ≤ 0 by linarith),
+        max_eq_left (show 0 ≤ -x by linarith)]
+      ring
+  have hdiff : ∀ x : ℝ, max x 0 - max (-x) 0 = x := by
+    intro x
+    rcases le_or_gt 0 x with hx | hx
+    · rw [max_eq_left hx, max_eq_right (show (-x) ≤ 0 by linarith)]; ring
+    · rw [max_eq_right (show x ≤ 0 by linarith), max_eq_left (show 0 ≤ -x by linarith)]; ring
+  have hsum : (∑ a, max (p a - q a) 0) - (∑ a, max (q a - p a) 0) = 0 := by
+    calc (∑ a, max (p a - q a) 0) - (∑ a, max (q a - p a) 0)
+        = ∑ a, (max (p a - q a) 0 - max (q a - p a) 0) := by
+          rw [Finset.sum_sub_distrib]
+      _ = ∑ a, (p a - q a) := by
+          apply Finset.sum_congr rfl
+          intro a _
+          rw [show q a - p a = -(p a - q a) from by ring]
+          exact hdiff _
+      _ = (∑ a, p a) - ∑ a, q a := by
+          rw [Finset.sum_sub_distrib]
+      _ = 0 := sub_eq_zero.mpr h
+  have key : (∑ a, max (p a - q a) 0) = ∑ a, max (q a - p a) 0 := sub_eq_zero.mp hsum
+  show (1 / ((2 : ℕ) : ℝ)) * ∑ a, |p a - q a| = _
+  rw [Finset.sum_congr rfl (fun a _ => hmax (p a - q a)), Finset.sum_add_distrib]
+  have hT : (∑ a, max (-(p a - q a)) 0) = ∑ a, max (p a - q a) 0 := by
+    trans (∑ a, max (q a - p a) 0)
+    · apply Finset.sum_congr rfl
+      intro a _
+      rw [show q a - p a = -(p a - q a) from by ring]
+    · exact key.symm
+  rw [hT]
+  push_cast
+  ring
+
+/-- The left cosets of `H` as the fibers of `QuotientGroup.mk`: the bijection
+with `H` itself used to disintegrate sums over `G`. -/
+def fiberMkEquiv (H : Subgroup G) (Q : G ⧸ H) :
+    H ≃ {g : G // QuotientGroup.mk g = Q} := by
+  classical
+  refine Equiv.ofBijective (fun h => ⟨Quotient.out Q * (h : G), ?_⟩) ⟨?_, ?_⟩
+  · exact (QuotientGroup.mk_mul_of_mem _ h.2).trans (Quotient.out_eq Q)
+  · intro h₁ h₂ hEq
+    apply Subtype.ext
+    exact mul_left_cancel (congrArg Subtype.val hEq)
+  · intro g
+    have hmk : QuotientGroup.mk (s := H) g.1 = QuotientGroup.mk (s := H) (Quotient.out Q) :=
+      g.2.trans (Quotient.out_eq Q).symm
+    rw [QuotientGroup.eq] at hmk
+    have hmem : (Quotient.out Q)⁻¹ * g.1 ∈ H := by
+      have := inv_mem hmk
+      rwa [mul_inv_rev, inv_inv] at this
+    refine ⟨⟨(Quotient.out Q)⁻¹ * g.1, hmem⟩, ?_⟩
+    apply Subtype.ext
+    show Quotient.out Q * ((Quotient.out Q)⁻¹ * g.1) = g.1
+    exact mul_inv_cancel_left _ _
+
+/-- coset mass law evaluated on a representative. -/
+lemma cosetMassLaw_mk_eq (μ : G → ℝ) (H : Subgroup G) (g : G) :
+    cosetMassLaw μ H (QuotientGroup.mk g) = ∑ h : H, μ (g * h) := rfl
+
+/-- Sums over `G` disintegrate over the cosets: the fiber sum is the coset
+mass law. -/
+lemma sum_fiber_mk (μ : G → ℝ) (H : Subgroup G) (Q : G ⧸ H) :
+    (∑ g : {g : G // QuotientGroup.mk g = Q}, μ g.1) = cosetMassLaw μ H Q := by
+  classical
+  have h1 : (∑ g : {g : G // QuotientGroup.mk g = Q}, μ g.1) =
+      ∑ h : H, μ (Quotient.out Q * (h : G)) :=
+    (Fintype.sum_equiv (fiberMkEquiv H Q) (fun h => μ (Quotient.out Q * (h : G)))
+      (fun g => μ g.1) (fun h => rfl)).symm
+  have h2 : cosetMassLaw μ H Q = ∑ h : H, μ (Quotient.out Q * (h : G)) := by
+    conv_lhs => rw [← Quotient.out_eq Q]
+    exact cosetMassLaw_mk_eq μ H (Quotient.out Q)
+  rw [h1, h2]
+
+/-- The coset mass law has the same total mass as `µ`. -/
+lemma sum_cosetMassLaw (μ : G → ℝ) (H : Subgroup G) :
+    (∑ Q : G ⧸ H, cosetMassLaw μ H Q) = mass μ := by
+  classical
+  show (∑ Q : G ⧸ H, cosetMassLaw μ H Q) = ∑ g : G, μ g
+  rw [← Fintype.sum_fiberwise (QuotientGroup.mk (s := H)) μ]
+  apply Finset.sum_congr rfl
+  intro Q _
+  exact (sum_fiber_mk μ H Q).symm
+
+/-- The per-system trim (paper Lemma 2.3's first operation): within each left
+coset whose `µ`-mass exceeds the uniform mass `1/[G:H]`, scale all point
+masses by the ratio cap/mass. -/
+def trimCoset (μ : G → ℝ) (H : Subgroup G) (g : G) : ℝ :=
+  μ g * min 1 ((H.index : ℝ)⁻¹ / cosetMassLaw μ H (QuotientGroup.mk g))
+
+lemma trimCoset_nonneg (hμ : ∀ g, 0 ≤ μ g) (H : Subgroup G) (g : G) :
+    0 ≤ trimCoset μ H g := by
+  apply mul_nonneg (hμ g)
+  refine le_min zero_le_one (div_nonneg (by positivity) ?_)
+  rw [cosetMassLaw_mk_eq]
+  exact Finset.sum_nonneg (fun h _ => hμ _)
+
+lemma trimCoset_le (hμ : ∀ g, 0 ≤ μ g) (H : Subgroup G) (g : G) :
+    trimCoset μ H g ≤ μ g := by
+  have h1 := mul_le_mul_of_nonneg_left (min_le_left (1 : ℝ)
+    ((H.index : ℝ)⁻¹ / cosetMassLaw μ H (QuotientGroup.mk g))) (hμ g)
+  rwa [mul_one] at h1
+
+/-- The trim enforces the coset cap `1/[G:H]` (i.e. `LeftCosetCap … H 1`). -/
+lemma trimCoset_cosetCap (hμ : ∀ g, 0 ≤ μ g) (H : Subgroup G) :
+    LeftCosetCap (trimCoset μ H) H 1 := by
+  classical
+  intro g
+  have hconst : ∀ h : H, cosetMassLaw μ H (QuotientGroup.mk (g * h))
+      = cosetMassLaw μ H (QuotientGroup.mk g) :=
+    fun h => congrArg _ (QuotientGroup.mk_mul_of_mem g h.2)
+  have hsum : (∑ h : H, trimCoset μ H (g * h)) =
+      cosetMassLaw μ H (QuotientGroup.mk g) *
+        min 1 ((H.index : ℝ)⁻¹ / cosetMassLaw μ H (QuotientGroup.mk g)) := by
+    rw [cosetMassLaw_mk_eq, Finset.sum_mul]
+    apply Finset.sum_congr rfl
+    intro h _
+    show μ (g * (h : G)) * min 1 ((H.index:ℝ)⁻¹ / cosetMassLaw μ H (QuotientGroup.mk (g * h))) =
+        μ (g * (h : G)) * min 1 ((H.index:ℝ)⁻¹ / cosetMassLaw μ H (QuotientGroup.mk g))
+    rw [hconst h]
+  rw [one_div, hsum]
+  set L := cosetMassLaw μ H (QuotientGroup.mk g) with hL
+  set c := (H.index : ℝ)⁻¹ with hc
+  have hL0 : 0 ≤ L := by
+    rw [hL, cosetMassLaw_mk_eq]
+    exact Finset.sum_nonneg (fun h _ => hμ _)
+  have hc0 : 0 < c := by
+    rw [hc]
+    exact inv_pos.mpr (Nat.cast_pos.mpr (Nat.pos_of_ne_zero H.index_ne_zero_of_finite))
+  by_cases hLc : L ≤ c
+  · calc L * min 1 (c / L) ≤ L * 1 := mul_le_mul_of_nonneg_left (min_le_left _ _) hL0
+      _ = L := mul_one _
+      _ ≤ c := hLc
+  · rw [not_le] at hLc
+    have hLpos : 0 < L := hc0.trans hLc
+    have hmin : min 1 (c / L) = c / L := min_eq_right ((div_lt_one hLpos).mpr hLc).le
+    have hcc : L * min 1 (c / L) = c := by
+      rw [hmin]
+      exact mul_div_cancel₀ _ hLpos.ne'
+    exact hcc.le
+
+/-- The mass lost to the trim of one system is the summed positive excess of
+the coset mass law over the uniform mass. -/
+lemma trimCoset_loss (hμ : ∀ g, 0 ≤ μ g) (H : Subgroup G) :
+    mass μ - mass (trimCoset μ H) =
+      ∑ Q : G ⧸ H, max (cosetMassLaw μ H Q - (H.index : ℝ)⁻¹) 0 := by
+  classical
+  have hdiff : mass μ - mass (trimCoset μ H) =
+      ∑ g : G, μ g * (1 - min 1 ((H.index:ℝ)⁻¹ / cosetMassLaw μ H (QuotientGroup.mk g))) := by
+    show (∑ g, μ g) - ∑ g, trimCoset μ H g = _
+    rw [← Finset.sum_sub_distrib]
+    apply Finset.sum_congr rfl
+    intro g _
+    show μ g - μ g * min 1 ((H.index:ℝ)⁻¹ / cosetMassLaw μ H (QuotientGroup.mk g)) = _
+    ring
+  rw [hdiff, ← Fintype.sum_fiberwise (QuotientGroup.mk (s := H))
+    (fun g => μ g * (1 - min 1 ((H.index:ℝ)⁻¹ / cosetMassLaw μ H (QuotientGroup.mk g))))]
+  apply Finset.sum_congr rfl
+  intro Q _
+  have hconst : ∀ g : {g : G // QuotientGroup.mk g = Q},
+      cosetMassLaw μ H (QuotientGroup.mk g.1) = cosetMassLaw μ H Q :=
+    fun g => congrArg _ g.2
+  calc ∑ g : {g : G // QuotientGroup.mk g = Q},
+        μ g.1 * (1 - min 1 ((H.index:ℝ)⁻¹ / cosetMassLaw μ H (QuotientGroup.mk g.1)))
+      = ∑ g : {g : G // QuotientGroup.mk g = Q},
+        μ g.1 * (1 - min 1 ((H.index:ℝ)⁻¹ / cosetMassLaw μ H Q)) := by
+        apply Finset.sum_congr rfl
+        intro g _
+        rw [hconst g]
+    _ = cosetMassLaw μ H Q * (1 - min 1 ((H.index:ℝ)⁻¹ / cosetMassLaw μ H Q)) := by
+        rw [← Finset.sum_mul]
+        congr 1
+        exact sum_fiber_mk μ H Q
+    _ = max (cosetMassLaw μ H Q - (H.index:ℝ)⁻¹) 0 := by
+        set L := cosetMassLaw μ H Q with hL
+        set c := (H.index : ℝ)⁻¹ with hc
+        have hL0 : 0 ≤ L := by
+          rw [hL, ← Quotient.out_eq Q, cosetMassLaw_mk_eq]
+          exact Finset.sum_nonneg (fun h _ => hμ _)
+        have hc0 : 0 < c := by
+          rw [hc]
+          exact inv_pos.mpr (Nat.cast_pos.mpr (Nat.pos_of_ne_zero H.index_ne_zero_of_finite))
+        by_cases hLc : L ≤ c
+        · by_cases hLpos : 0 < L
+          · have hmin : min 1 (c / L) = 1 := min_eq_left ((one_le_div hLpos).mpr hLc)
+            rw [hmin, sub_self, mul_zero]
+            exact (max_eq_right (sub_nonpos.mpr hLc)).symm
+          · have hLz : L = 0 := le_antisymm (not_lt.mp hLpos) hL0
+            rw [hLz, div_zero, min_eq_right zero_le_one, zero_mul]
+            exact (max_eq_right (by linarith)).symm
+        · rw [not_le] at hLc
+          have hLpos : 0 < L := hc0.trans hLc
+          have hmin : min 1 (c / L) = c / L := min_eq_right ((div_lt_one hLpos).mpr hLc).le
+          rw [hmin]
+          have hrewrite : L * (1 - c / L) = L - c := by
+            rw [mul_sub, mul_one, mul_comm L (c / L), div_mul_cancel₀ c hLpos.ne']
+          rw [hrewrite]
+          exact (max_eq_left (sub_nonneg.mpr hLc.le)).symm
+
+/-- The mass lost to the trim of one system equals the quotient TV. -/
+lemma trimCoset_loss_eq_tv (hμ : ∀ g, 0 ≤ μ g) (hμ1 : mass μ = 1) (H : Subgroup G) :
+    mass μ - mass (trimCoset μ H) =
+      BinaryCoordinateSweeps.totalVariation (cosetMassLaw μ H)
+        (BinaryCoordinateSweeps.uniformLaw (G ⧸ H)) := by
+  classical
+  rw [trimCoset_loss hμ H, totalVariation_eq_sum_posPart]
+  · apply Finset.sum_congr rfl
+    intro Q _
+    congr 1
+    show cosetMassLaw μ H Q - (H.index : ℝ)⁻¹ =
+      cosetMassLaw μ H Q - (Fintype.card (G ⧸ H) : ℝ)⁻¹
+    rw [Subgroup.index_eq_card, Nat.card_eq_fintype_card]
+  · show (∑ Q, cosetMassLaw μ H Q) = ∑ Q, (Fintype.card (G ⧸ H) : ℝ)⁻¹
+    rw [sum_cosetMassLaw μ H, hμ1]
+    rw [Finset.sum_const, Finset.card_univ, nsmul_eq_mul,
+      mul_inv_cancel₀ (Nat.cast_ne_zero.mpr Fintype.card_ne_zero)]
+
+/-- The common trimmed subprobability (paper Lemma 2.3, the simultaneous
+`min` construction): pointwise minimum of the per-system trims. -/
+def trimMin {ι : Type*} [Fintype ι] [Nonempty ι] (μ : G → ℝ) (H : ι → Subgroup G) (g : G) : ℝ :=
+  Finset.inf' Finset.univ Finset.univ_nonempty (fun i => trimCoset μ (H i) g)
+
+/-- The minimum is attained by some system. -/
+lemma trimMin_eq_some {ι : Type*} [Fintype ι] [Nonempty ι] (μ : G → ℝ) (H : ι → Subgroup G)
+    (g : G) : ∃ i, trimMin μ H g = trimCoset μ (H i) g := by
+  obtain ⟨i, -, hi⟩ := Finset.exists_mem_eq_inf' Finset.univ_nonempty
+    (fun i => trimCoset μ (H i) g)
+  exact ⟨i, hi⟩
+
+lemma trimMin_nonneg {ι : Type*} [Fintype ι] [Nonempty ι] (hμ : ∀ g, 0 ≤ μ g)
+    (H : ι → Subgroup G) (g : G) : 0 ≤ trimMin μ H g := by
+  show 0 ≤ Finset.inf' _ _ _
+  exact Finset.le_inf' _ _ (fun i _ => trimCoset_nonneg hμ (H i) g)
+
+lemma trimMin_le {ι : Type*} [Fintype ι] [Nonempty ι] (hμ : ∀ g, 0 ≤ μ g)
+    (H : ι → Subgroup G) (g : G) : trimMin μ H g ≤ μ g := by
+  obtain ⟨i, hi⟩ := trimMin_eq_some μ H g
+  rw [hi]
+  exact trimCoset_le hμ (H i) g
+
+/-- The common trim inherits every system's coset cap. -/
+lemma trimMin_cosetCap {ι : Type*} [Fintype ι] [Nonempty ι] (hμ : ∀ g, 0 ≤ μ g)
+    (H : ι → Subgroup G) (i₀ : ι) : LeftCosetCap (trimMin μ H) (H i₀) 1 := by
+  intro g
+  refine le_trans ?_ (trimCoset_cosetCap hμ (H i₀) g)
+  apply Finset.sum_le_sum
+  intro h _
+  exact Finset.inf'_le _ (Finset.mem_univ i₀)
+
+/-- The common trim loses at most the summed marginal TVs. -/
+lemma trimMin_mass_ge {ι : Type*} [Fintype ι] [Nonempty ι] (hμ : ∀ g, 0 ≤ μ g)
+    (hμ1 : mass μ = 1) (H : ι → Subgroup G) :
+    1 - (∑ i, BinaryCoordinateSweeps.totalVariation (cosetMassLaw μ (H i))
+        (BinaryCoordinateSweeps.uniformLaw (G ⧸ (H i)))) ≤ mass (trimMin μ H) := by
+  have hpoint : ∀ g : G, μ g - trimMin μ H g ≤ ∑ i, (μ g - trimCoset μ (H i) g) := by
+    intro g
+    obtain ⟨i₀, hi₀⟩ := trimMin_eq_some μ H g
+    calc μ g - trimMin μ H g = μ g - trimCoset μ (H i₀) g := by rw [hi₀]
+      _ ≤ ∑ i, (μ g - trimCoset μ (H i) g) :=
+        Finset.single_le_sum (fun i _ => sub_nonneg.mpr (trimCoset_le hμ (H i) g))
+          (Finset.mem_univ i₀)
+  have hloss : mass μ - mass (trimMin μ H) ≤
+      ∑ i, (mass μ - mass (trimCoset μ (H i))) := by
+    show (∑ g, μ g) - (∑ g, trimMin μ H g) ≤ _
+    rw [← Finset.sum_sub_distrib]
+    calc ∑ g, (μ g - trimMin μ H g) ≤ ∑ g, ∑ i, (μ g - trimCoset μ (H i) g) :=
+          Finset.sum_le_sum (fun g _ => hpoint g)
+      _ = ∑ i, ∑ g, (μ g - trimCoset μ (H i) g) := Finset.sum_comm
+      _ = ∑ i, (mass μ - mass (trimCoset μ (H i))) := by
+          apply Finset.sum_congr rfl
+          intro i _
+          show (∑ g, (μ g - trimCoset μ (H i) g)) = (∑ g, μ g) - ∑ g, trimCoset μ (H i) g
+          rw [Finset.sum_sub_distrib]
+  have htv : mass μ - mass (trimMin μ H) ≤
+      ∑ i, BinaryCoordinateSweeps.totalVariation (cosetMassLaw μ (H i))
+        (BinaryCoordinateSweeps.uniformLaw (G ⧸ (H i))) := by
+    refine hloss.trans ?_
+    apply Finset.sum_le_sum
+    intro i _
+    rw [trimCoset_loss_eq_tv hμ hμ1 (H i)]
+  linarith [hμ1]
+
+/-- Lemma 2.3 (trimming), as needed by the convergence corollaries: a common
+subprobability below `µ` with coset cap one on every system, losing at most
+the summed marginal TV. -/
+theorem exists_trimmed_subprobability {ι : Type*} [Fintype ι] [Nonempty ι]
+    (μ : G → ℝ) (hμ0 : ∀ g, 0 ≤ μ g) (hμ1 : mass μ = 1) (H : ι → Subgroup G) :
+    ∃ f : G → ℝ, (∀ g, 0 ≤ f g) ∧ (∀ g, f g ≤ μ g) ∧
+      1 - (∑ i, BinaryCoordinateSweeps.totalVariation (cosetMassLaw μ (H i))
+          (BinaryCoordinateSweeps.uniformLaw (G ⧸ (H i)))) ≤ mass f ∧
+      ∀ i, LeftCosetCap f (H i) 1 :=
+  ⟨trimMin μ H, trimMin_nonneg hμ0 H, trimMin_le hμ0 H,
+    trimMin_mass_ge hμ0 hμ1 H, fun i => trimMin_cosetCap hμ0 H i⟩
+
+end Trimming
+
 end
 end PartialPermutation
 

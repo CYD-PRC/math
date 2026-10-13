@@ -15,6 +15,7 @@ import OAI.RepresentationTheory.PartialPermutation.SpechtShapes
 import OAI.RepresentationTheory.PartialPermutation.SpechtClassification
 import OAI.RepresentationTheory.PartialPermutation.TableauLimits
 import OAI.RepresentationTheory.PartialPermutation.DeficitPlancherel
+import OAI.RepresentationTheory.PartialPermutation.NormBounds
 
 /-!
 # G1 solution module, slice 1: Fourier core of the amplification (Prop 2.5)
@@ -2781,6 +2782,346 @@ lemma exists_partition_avgMarginal_le (μF : (n : ℕ) → Equiv.Perm (Fin n) �
   exact ⟨P.1, P.2.1, P.2.2, hP⟩
 
 end PartitionSelection
+
+/-! ## Slice 4c-δ: the two convergence corollaries (paper Cor 3.3 / Cor 3.6)
+
+Assembly along `eightDivisible`: select the partition (Lemma 2.2), trim
+(Lemma 2.3), feed the coset cap into the tree's `complementaryCosets`
+(Theorem 1.1), and close by the filter-generic Proposition 2.5 exit
+(`tv_tendsto_zero_of_energy`). The `henergy` input is the real transported
+bound — no vacuity: `eightDivisible_neBot` certifies the filter. -/
+
+section Corollaries
+
+open scoped Classical
+open Filter
+
+/-- Eventually, along `eightDivisible`, `8 ∣ n`. -/
+lemma eightDivisible_dvd : ∀ᶠ n in eightDivisible, 8 ∣ n :=
+  Filter.Eventually.filter_mono inf_le_right
+    (by rw [Filter.eventually_principal]; exact fun n h => h)
+
+/-- Eventually, along `eightDivisible`, `k ≤ n`. -/
+lemma eightDivisible_ge (k : ℕ) : ∀ᶠ n in eightDivisible, k ≤ n :=
+  (eventually_ge_atTop k).filter_mono inf_le_left
+
+/-- The selected partition of Lemma 2.2, as a function of `n` (junk value off
+the multiples of eight). -/
+noncomputable def selectedPartition (μ : (n : ℕ) → Equiv.Perm (Fin n) → ℝ) (n : ℕ) :
+    Fin 8 → Finset (Fin n) :=
+  if h : 8 ∣ n then (exists_partition_avgMarginal_le μ n h).choose
+    else fun _ => ∅
+
+/-- The selected partition's specification (cardinality, disjointness, and
+the summed-error bound). -/
+lemma selectedPartition_spec (μ : (n : ℕ) → Equiv.Perm (Fin n) → ℝ) {n : ℕ} (h8n : 8 ∣ n) :
+    (∀ i, (selectedPartition μ n i).card = n / 8) ∧
+      Pairwise (Function.onFun Disjoint (selectedPartition μ n)) ∧
+      (∑ i, marginalErr (μ n) (selectedPartition μ n i)) ≤ 8 * avgMarginalTV μ n := by
+  classical
+  have h := (exists_partition_avgMarginal_le μ n h8n).choose_spec
+  unfold selectedPartition
+  rw [dite_eq_left h8n]
+  exact h
+
+/-- The selected partition, at the level of sets: nonempty blocks, pairwise
+disjoint, covering (the inputs of `complementaryCosets`). -/
+lemma selectedPartition_setProps (μ : (n : ℕ) → Equiv.Perm (Fin n) → ℝ) {n : ℕ}
+    (h8n : 8 ∣ n) (hn : 8 ≤ n) :
+    (∀ i, ((selectedPartition μ n i : Finset (Fin n)) : Set (Fin n)).Nonempty) ∧
+      Pairwise (fun i j => Disjoint (((selectedPartition μ n i : Finset (Fin n)) :
+        Set (Fin n))) ((selectedPartition μ n j : Finset (Fin n)) : Set (Fin n))) ∧
+      (⋃ i, ((selectedPartition μ n i : Finset (Fin n)) : Set (Fin n))) = Set.univ := by
+  classical
+  obtain ⟨hcard, hdis, -⟩ := selectedPartition_spec μ h8n
+  refine ⟨?_, ?_, ?_⟩
+  · intro i
+    rw [Finset.coe_nonempty, ← Finset.card_pos, hcard i]
+    omega
+  · intro i j hij
+    rw [Finset.disjoint_coe]
+    exact hdis hij
+  · have hU : Finset.univ.biUnion (selectedPartition μ n) = Finset.univ := by
+      apply Finset.eq_univ_of_card
+      rw [Finset.card_biUnion ?_, Fintype.card_fin]
+      · rw [Finset.sum_congr rfl (fun i _ => hcard i), Finset.sum_const, Finset.card_fin,
+          smul_eq_mul]
+        exact Nat.mul_div_cancel' h8n
+      · intro i _ j _ hij
+        exact hdis hij
+    have hcoe : (⋃ i, ((selectedPartition μ n i : Finset (Fin n)) : Set (Fin n))) =
+        ↑(Finset.univ.biUnion (selectedPartition μ n)) := by
+      rw [Finset.coe_biUnion, Finset.coe_univ, Set.biUnion_univ]
+    rw [hcoe, hU, Finset.coe_univ]
+
+/-- The trimmed subprobability along the selected partition (junk `0` off the
+multiples of eight below eight). -/
+noncomputable def trimmedLaw (μ : (n : ℕ) → Equiv.Perm (Fin n) → ℝ)
+    (hμ : ∀ n, 8 ∣ n → (∀ g, 0 ≤ μ n g) ∧ mass (μ n) = 1) (n : ℕ) :
+    Equiv.Perm (Fin n) → ℝ :=
+  if h : 8 ∣ n ∧ 8 ≤ n then
+    (exists_trimmed_subprobability (μ n) (hμ n h.1).1 (hμ n h.1).2
+      (fun i => blockSubgroup ((selectedPartition μ n) i : Set (Fin n)))).choose
+  else 0
+
+/-- The trimmed law's specification (nonneg, below `μ`, mass loss bounded by
+the summed marginal errors, coset cap one on every block). -/
+lemma trimmedLaw_spec (μ : (n : ℕ) → Equiv.Perm (Fin n) → ℝ)
+    (hμ : ∀ n, 8 ∣ n → (∀ g, 0 ≤ μ n g) ∧ mass (μ n) = 1) {n : ℕ}
+    (h8n : 8 ∣ n) (hn : 8 ≤ n) :
+    (∀ g, 0 ≤ trimmedLaw μ hμ n g) ∧ (∀ g, trimmedLaw μ hμ n g ≤ μ n g) ∧
+      1 - (∑ i, marginalErr (μ n) (selectedPartition μ n i)) ≤ mass (trimmedLaw μ hμ n) ∧
+      ∀ i, LeftCosetCap (trimmedLaw μ hμ n)
+        (blockSubgroup ((selectedPartition μ n i : Finset (Fin n)) : Set (Fin n))) 1 := by
+  classical
+  have h := (exists_trimmed_subprobability (μ n) (hμ n h8n).1 (hμ n h8n).2
+    (fun i => blockSubgroup ((selectedPartition μ n) i : Set (Fin n)))).choose_spec
+  have hunfold : trimmedLaw μ hμ n = (exists_trimmed_subprobability (μ n) (hμ n h8n).1
+      (hμ n h8n).2 (fun i => blockSubgroup ((selectedPartition μ n) i : Set (Fin n)))).choose := by
+    unfold trimmedLaw
+    exact dite_eq_left ⟨h8n, hn⟩
+  rw [hunfold]
+  exact h
+
+/-- The trimmed law's mass tends to one along `eightDivisible`. -/
+lemma trimmedLaw_mass_tendsto (μ : (n : ℕ) → Equiv.Perm (Fin n) → ℝ)
+    (hμ : ∀ n, 8 ∣ n → (∀ g, 0 ≤ μ n g) ∧ mass (μ n) = 1)
+    (hmarg : Tendsto (fun n => avgMarginalTV μ n) eightDivisible (nhds 0)) :
+    Tendsto (fun n => mass (trimmedLaw μ hμ n)) eightDivisible (nhds 1) := by
+  classical
+  have h8e : ∀ᶠ n in eightDivisible, 8 ∣ n := eightDivisible_dvd
+  have hge : ∀ᶠ n in eightDivisible, 8 ≤ n := eightDivisible_ge 8
+  have hgood : ∀ᶠ n in eightDivisible, 8 ∣ n ∧ 8 ≤ n := h8e.and hge
+  have hsel : ∀ᶠ n in eightDivisible,
+      (∑ i, marginalErr (μ n) (selectedPartition μ n i)) ≤ 8 * avgMarginalTV μ n := by
+    filter_upwards [h8e] with n h8n
+    exact (selectedPartition_spec μ h8n).2.2
+  have hlo : ∀ᶠ n in eightDivisible, 1 - 8 * avgMarginalTV μ n ≤ mass (trimmedLaw μ hμ n) := by
+    filter_upwards [hgood] with n ⟨h8n, hn⟩
+    have hspec := trimmedLaw_spec μ hμ h8n hn
+    have h1 : (1:ℝ) - 8 * avgMarginalTV μ n ≤
+        1 - ∑ i, marginalErr (μ n) (selectedPartition μ n i) := by
+      linarith [(selectedPartition_spec μ h8n).2.2]
+    exact h1.trans hspec.2.2.1
+  have hhi : ∀ᶠ n in eightDivisible, mass (trimmedLaw μ hμ n) ≤ 1 := by
+    filter_upwards [hgood] with n ⟨h8n, hn⟩
+    have hspec := trimmedLaw_spec μ hμ h8n hn
+    have hle : mass (trimmedLaw μ hμ n) ≤ mass (μ n) := by
+      apply Finset.sum_le_sum
+      intro g _
+      exact hspec.2.1 g
+    rw [(hμ n h8n).2] at hle
+    exact hle
+  have h8avg : Tendsto (fun n => 8 * avgMarginalTV μ n) eightDivisible (nhds 0) := by
+    have := hmarg.const_mul (8 : ℝ)
+    simpa using this
+  have hlot : Tendsto (fun n => 1 - 8 * avgMarginalTV μ n) eightDivisible (nhds 1) := by
+    have h := (tendsto_const_nhds (x := (1:ℝ))).sub h8avg
+    simpa using h
+  exact tendsto_of_tendsto_of_tendsto_of_le_of_le' hlot tendsto_const_nhds hlo hhi
+
+/-- `hsNormSq` of the zero endomorphism. -/
+lemma hsNormSq_zero {V : Type*} [NormedAddCommGroup V] [InnerProductSpace ℂ V]
+    [FiniteDimensional ℂ V] : hsNormSq (0 : Module.End ℂ V) = 0 := by
+  rw [hsNormSq_eq_sum (stdOrthonormalBasis ℂ V)]
+  simp
+
+/-- The Fourier transform of the zero mass function is zero. -/
+lemma complexFourier_zero {G : Type*} [Group G] [Fintype G] {V : Type*} [AddCommGroup V]
+    [Module ℂ V] (ρ : Representation ℂ G V) :
+    complexFourier ρ (0 : G → ℂ) = 0 := by
+  simp [complexFourier]
+
+/-- `C₁` (the uniform reciprocal-degree constant at `u = 1`) is positive: it
+majorizes the `S₁` contribution, which is a positive sum. -/
+lemma symmetricDegreeConstant_one_pos : 0 < symmetricDegreeConstant 1 := by
+  classical
+  have hpos : (0:ℝ) < symmetricInverseDegreeSum 1 1 := by
+    unfold symmetricInverseDegreeSum inverseDegreeSum
+    apply Finset.sum_pos'
+    · intro c _
+      exact Real.rpow_nonneg (Nat.cast_nonneg _) _
+    · exact ⟨trivialIndex _, Finset.mem_univ _,
+        Real.rpow_pos_of_pos (Nat.cast_pos.mpr
+          (zero_lt_one.trans_le (one_le_irreducibleDegree _))) _⟩
+  exact hpos.trans_le (symmetricInverseDegreeSum_le_constant le_rfl zero_lt_one)
+
+/-- Theorem 1.1 evaluated on the selected partition and the trimmed law
+(`b = 8`, `u = 1`, `B = 1`): both the Hilbert–Schmidt and the squared
+operator bound with the constant `8·C₁` and the exponent `−5/8`. -/
+lemma trimmed_cc (μ : (n : ℕ) → Equiv.Perm (Fin n) → ℝ)
+    (hμ : ∀ n, 8 ∣ n → (∀ g, 0 ≤ μ n g) ∧ mass (μ n) = 1) {n : ℕ}
+    (h8n : 8 ∣ n) (hn : 8 ≤ n) :
+    (∀ (V : Type) [NormedAddCommGroup V] [InnerProductSpace ℂ V] [FiniteDimensional ℂ V]
+      (ρ : Representation ℂ (Equiv.Perm (Fin n)) V),
+      Representation.IsIrreducible ρ → IsUnitary ρ →
+        hsNormSq (complexFourier ρ (fun g => (trimmedLaw μ hμ n g : ℂ))) ≤
+          8 * symmetricDegreeConstant 1 * (Module.finrank ℂ V : ℝ) ^ (-(5/8 : ℝ))) ∧
+    (∀ (V : Type) [NormedAddCommGroup V] [InnerProductSpace ℂ V] [FiniteDimensional ℂ V]
+      (ρ : Representation ℂ (Equiv.Perm (Fin n)) V),
+      Representation.IsIrreducible ρ → IsUnitary ρ →
+        ‖LinearMap.toContinuousLinearMap (complexFourier ρ
+          (fun g => (trimmedLaw μ hμ n g : ℂ)))‖ ^ 2 ≤
+          8 * symmetricDegreeConstant 1 * (Module.finrank ℂ V : ℝ) ^ (-(5/8 : ℝ))) := by
+  classical
+  have hspec := trimmedLaw_spec μ hμ h8n hn
+  have hprops := selectedPartition_setProps μ h8n hn
+  have hmassle : mass (trimmedLaw μ hμ n) ≤ 1 := by
+    have hle : mass (trimmedLaw μ hμ n) ≤ mass (μ n) := by
+      apply Finset.sum_le_sum
+      intro g _
+      exact hspec.2.1 g
+    rw [(hμ n h8n).2] at hle
+    exact hle
+  have hcc := complementaryCosets n 8 (by norm_num)
+    (fun i => ((selectedPartition μ n i : Finset (Fin n)) : Set (Fin n)))
+    hprops.1 hprops.2.1 hprops.2.2
+  constructor
+  · intro V _ _ _ ρ hirr hU
+    have h := (hcc V ρ hirr hU (trimmedLaw μ hμ n) 1 1 hspec.1 hmassle (by norm_num)
+      hspec.2.2.2).1
+    refine h.trans (le_of_eq ?_)
+    push_cast
+    rw [show (-(1 : ℝ) + (1 + 2) / 8) = -(5/8 : ℝ) by norm_num]
+    ring
+  · intro V _ _ _ ρ hirr hU
+    have h := (hcc V ρ hirr hU (trimmedLaw μ hμ n) 1 1 hspec.1 hmassle (by norm_num)
+      hspec.2.2.2).2
+    refine h.trans (le_of_eq ?_)
+    push_cast
+    rw [show (-(1 : ℝ) + (1 + 2) / 8) = -(5/8 : ℝ) by norm_num]
+    ring
+
+/-- The HS bound for every `n` (off the good indices the trimmed law is zero
+and the bound is trivial). -/
+lemma trimmed_hsBound (μ : (n : ℕ) → Equiv.Perm (Fin n) → ℝ)
+    (hμ : ∀ n, 8 ∣ n → (∀ g, 0 ≤ μ n g) ∧ mass (μ n) = 1) :
+    ∀ n, ∀ (V : Type) [NormedAddCommGroup V] [InnerProductSpace ℂ V] [FiniteDimensional ℂ V]
+      (ρ : Representation ℂ (Equiv.Perm (Fin n)) V),
+      Representation.IsIrreducible ρ → IsUnitary ρ → 1 < Module.finrank ℂ V →
+        hsNormSq (complexFourier ρ (fun g => (trimmedLaw μ hμ n g : ℂ))) ≤
+          (8 * symmetricDegreeConstant 1) * (Module.finrank ℂ V : ℝ) ^ (-(5/8 : ℝ)) := by
+  intro n V _ _ _ ρ hirr hU hD
+  by_cases hgood : 8 ∣ n ∧ 8 ≤ n
+  · exact (trimmed_cc μ hμ hgood.1 hgood.2).1 V ρ hirr hU
+  · have hzero : trimmedLaw μ hμ n = 0 := by
+      unfold trimmedLaw
+      rw [dite_eq_right hgood]
+    have hF : (fun g => (trimmedLaw μ hμ n g : ℂ)) = 0 := by
+      rw [hzero]
+      funext g
+      simp
+    rw [hF, complexFourier_zero, hsNormSq_zero]
+    exact mul_nonneg (mul_nonneg (by norm_num) symmetricDegreeConstant_one_pos.le)
+      (Real.rpow_nonneg (Nat.cast_nonneg _) _)
+
+/-- The operator bound for every `n`: the squared bound of `trimmed_cc`
+under the square root (`√(8·C₁·D^{−5/8}) = √(8C₁)·D^{−5/16}`). -/
+lemma trimmed_opBound (μ : (n : ℕ) → Equiv.Perm (Fin n) → ℝ)
+    (hμ : ∀ n, 8 ∣ n → (∀ g, 0 ≤ μ n g) ∧ mass (μ n) = 1) :
+    ∀ n, ∀ (V : Type) [NormedAddCommGroup V] [InnerProductSpace ℂ V] [FiniteDimensional ℂ V]
+      (ρ : Representation ℂ (Equiv.Perm (Fin n)) V),
+      Representation.IsIrreducible ρ → IsUnitary ρ → 1 < Module.finrank ℂ V →
+        ‖LinearMap.toContinuousLinearMap (complexFourier ρ
+          (fun g => (trimmedLaw μ hμ n g : ℂ)))‖ ≤
+          Real.sqrt (8 * symmetricDegreeConstant 1) *
+            (Module.finrank ℂ V : ℝ) ^ (-(5/16 : ℝ)) := by
+  intro n V _ _ _ ρ hirr hU hD
+  by_cases hgood : 8 ∣ n ∧ 8 ≤ n
+  · have h2 := (trimmed_cc μ hμ hgood.1 hgood.2).2 V ρ hirr hU
+    have hD0 : (0:ℝ) < Module.finrank ℂ V := by exact_mod_cast zero_lt_one.trans hD
+    calc ‖LinearMap.toContinuousLinearMap (complexFourier ρ
+            (fun g => (trimmedLaw μ hμ n g : ℂ)))‖
+        = Real.sqrt (‖LinearMap.toContinuousLinearMap (complexFourier ρ
+            (fun g => (trimmedLaw μ hμ n g : ℂ)))‖^2) :=
+          (Real.sqrt_sq (norm_nonneg _)).symm
+      _ ≤ Real.sqrt (8 * symmetricDegreeConstant 1 * (Module.finrank ℂ V : ℝ)^(-(5/8:ℝ))) :=
+          Real.sqrt_le_sqrt h2
+      _ = Real.sqrt (8 * symmetricDegreeConstant 1) *
+            Real.sqrt ((Module.finrank ℂ V : ℝ)^(-(5/8:ℝ))) :=
+          Real.sqrt_mul (mul_nonneg (by norm_num) symmetricDegreeConstant_one_pos.le) _
+      _ = Real.sqrt (8 * symmetricDegreeConstant 1) *
+            (Module.finrank ℂ V : ℝ)^(-(5/16:ℝ)) := by
+          congr 1
+          rw [Real.sqrt_eq_rpow, ← Real.rpow_mul hD0.le,
+            show (-(5/8:ℝ)) * (1/2) = -(5/16:ℝ) from by norm_num]
+  · have hzero : trimmedLaw μ hμ n = 0 := by
+      unfold trimmedLaw
+      rw [dite_eq_right hgood]
+    have hF : (fun g => (trimmedLaw μ hμ n g : ℂ)) = 0 := by
+      rw [hzero]
+      funext g
+      simp
+    rw [hF, complexFourier_zero]
+    rw [show (LinearMap.toContinuousLinearMap (0 : Module.End ℂ V)) = (0 : V →L[ℂ] V) from by
+      ext v
+      rfl]
+    rw [norm_zero]
+    exact mul_nonneg (Real.sqrt_nonneg _) (Real.rpow_nonneg (Nat.cast_nonneg _) _)
+
+/-- Corollary 3.3: four convolutions by the orbit argument. -/
+theorem four_convolution_convergence
+    (μ : (n : ℕ) → Equiv.Perm (Fin n) → ℝ)
+    (hμ : ∀ n, 8 ∣ n → (∀ g, 0 ≤ μ n g) ∧ mass (μ n) = 1)
+    (hsign : Tendsto (fun n => mass (fun g => μ n g *
+      BinaryCoordinateSweeps.realSign g)) eightDivisible (nhds 0))
+    (hmarg : Tendsto (fun n => avgMarginalTV μ n) eightDivisible (nhds 0)) :
+    Tendsto (fun n => BinaryCoordinateSweeps.totalVariation
+        (BinaryCoordinateSweeps.convolutionPower (μ n) 4)
+        (BinaryCoordinateSweeps.uniformLaw (Equiv.Perm (Fin n))))
+      eightDivisible (nhds 0) := by
+  classical
+  have h8e : ∀ᶠ n in eightDivisible, 8 ∣ n := eightDivisible_dvd
+  have hge : ∀ᶠ n in eightDivisible, 8 ≤ n := eightDivisible_ge 8
+  have hgood : ∀ᶠ n in eightDivisible, 8 ∣ n ∧ 8 ≤ n := h8e.and hge
+  have hμe : ∀ᶠ n in eightDivisible, (∀ g, 0 ≤ μ n g) ∧ mass (μ n) = 1 := by
+    filter_upwards [h8e] with n h8n
+    exact hμ n h8n
+  have hfe : ∀ᶠ n in eightDivisible, (∀ g, 0 ≤ trimmedLaw μ hμ n g) ∧
+      ∀ g, trimmedLaw μ hμ n g ≤ μ n g := by
+    filter_upwards [hgood] with n ⟨h8n, hn⟩
+    have hspec := trimmedLaw_spec μ hμ h8n hn
+    exact ⟨hspec.1, hspec.2.1⟩
+  have hmass : Tendsto (fun n => mass (trimmedLaw μ hμ n)) eightDivisible (nhds 1) :=
+    trimmedLaw_mass_tendsto μ hμ hmarg
+  exact tv_tendsto_zero_of_energy 4 hμe hfe hmass
+    (operator_energy_tendsto_zero inf_le_left
+      (Real.sqrt_pos.mpr (mul_pos (by norm_num) symmetricDegreeConstant_one_pos))
+      (by norm_num) 4 (by norm_num)
+      hμe hfe hmass hsign (trimmed_opBound μ hμ))
+
+/-- Corollary 3.6: two convolutions from eight complements. -/
+theorem two_convolution_convergence
+    (μ : (n : ℕ) → Equiv.Perm (Fin n) → ℝ)
+    (hμ : ∀ n, 8 ∣ n → (∀ g, 0 ≤ μ n g) ∧ mass (μ n) = 1)
+    (hsign : Tendsto (fun n => mass (fun g => μ n g *
+      BinaryCoordinateSweeps.realSign g)) eightDivisible (nhds 0))
+    (hmarg : Tendsto (fun n => avgMarginalTV μ n) eightDivisible (nhds 0)) :
+    Tendsto (fun n => BinaryCoordinateSweeps.totalVariation
+        (BinaryCoordinateSweeps.convolutionPower (μ n) 2)
+        (BinaryCoordinateSweeps.uniformLaw (Equiv.Perm (Fin n))))
+      eightDivisible (nhds 0) := by
+  classical
+  have h8e : ∀ᶠ n in eightDivisible, 8 ∣ n := eightDivisible_dvd
+  have hge : ∀ᶠ n in eightDivisible, 8 ≤ n := eightDivisible_ge 8
+  have hgood : ∀ᶠ n in eightDivisible, 8 ∣ n ∧ 8 ≤ n := h8e.and hge
+  have hμe : ∀ᶠ n in eightDivisible, (∀ g, 0 ≤ μ n g) ∧ mass (μ n) = 1 := by
+    filter_upwards [h8e] with n h8n
+    exact hμ n h8n
+  have hfe : ∀ᶠ n in eightDivisible, (∀ g, 0 ≤ trimmedLaw μ hμ n g) ∧
+      ∀ g, trimmedLaw μ hμ n g ≤ μ n g := by
+    filter_upwards [hgood] with n ⟨h8n, hn⟩
+    have hspec := trimmedLaw_spec μ hμ h8n hn
+    exact ⟨hspec.1, hspec.2.1⟩
+  have hmass : Tendsto (fun n => mass (trimmedLaw μ hμ n)) eightDivisible (nhds 1) :=
+    trimmedLaw_mass_tendsto μ hμ hmarg
+  exact tv_tendsto_zero_of_energy 2 hμe hfe hmass
+    (hs_energy_tendsto_zero inf_le_left
+      (mul_pos (by norm_num) symmetricDegreeConstant_one_pos)
+      (by norm_num) 2 (by norm_num)
+      hμe hfe hmass hsign (trimmed_hsBound μ hμ))
+
+end Corollaries
 
 end
 end PartialPermutation

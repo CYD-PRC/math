@@ -1,6 +1,11 @@
 import Mathlib
 import OAI.Probability.BinarySweep.Model
 import OAI.Probability.BinarySweep.Processes.Basic
+import OAI.Combinatorics.Permanent.LawBridge
+import OAI.Combinatorics.Permanent.RepNormBridge
+import OAI.Probability.CubeShuffle.WeightedModel
+import OAI.Probability.CubeShuffle.WeightedMoments
+import OAI.Probability.BinarySweep.Mixing.BinaryMixingBounds
 
 /-!
 # The Thorp mixing consequence of the four-row moment recursion (solution module)
@@ -595,6 +600,357 @@ lemma sweepMomentTrace_le {d D : ℕ}
   exact hsum
 
 end ThorpFourRow
+
+
+/-! ## Slice G8-γc: the representation-equivalence chain (merged from the RepChain scratch module) -/
+
+namespace ThorpFourRow
+
+open scoped BigOperators
+
+/-- 标准桥：二值卡组与 `Fin (2^d)` 的等价（`Slot d` 与 `Card d` 同为 `Fin d → Bool`）。 -/
+def slotFinEquiv (d : ℕ) : Slot d ≃ Fin (2^d) :=
+  (Fintype.equivFin (CubeShuffle.Card d)).trans (finCongr (CubeShuffle.card_positions d))
+
+/-- `ρ` 沿桥传输到标准对称群 `Perm (Fin (2^d))` 上的表示。 -/
+def transportedRep {d D : ℕ} (ρ : Representation ℂ (Equiv.Perm (Slot d)) (RepSpace D)) :
+    Representation ℂ (Equiv.Perm (Fin (2^d))) (RepSpace D) :=
+  ρ.comp (slotFinEquiv d).symm.permCongrHom.toMonoidHom
+
+lemma transportedRep_apply {d D : ℕ} (ρ : Representation ℂ (Equiv.Perm (Slot d)) (RepSpace D))
+    (h : Equiv.Perm (Fin (2^d))) (v : RepSpace D) :
+    transportedRep ρ h v = ρ ((slotFinEquiv d).symm.permCongr h) v := rfl
+
+instance transportedRep_isIrreducible {d D : ℕ}
+    (ρ : Representation ℂ (Equiv.Perm (Slot d)) (RepSpace D)) [Representation.IsIrreducible ρ] :
+    Representation.IsIrreducible (transportedRep ρ) :=
+  CubeShuffle.UnitaryFinite.irreducible_comp_equiv ρ (slotFinEquiv d).symm.permCongrHom
+
+/-- 范数保持（挑战侧 `IsUnitaryRep`）蕴涵内积保持（`PartialPermutation.IsUnitary`）：
+极化恒等式把内积写成范数的整系数组合，逐项用 `‖ρ g u‖ = ‖u‖` 改写。 -/
+lemma isUnitary_of_isUnitaryRep {d D : ℕ}
+    (ρ : Representation ℂ (Equiv.Perm (Slot d)) (RepSpace D)) (hU : IsUnitaryRep ρ) :
+    OAI.PartialPermutation.IsUnitary ρ := by
+  intro g x y
+  rw [inner_eq_sum_norm_sq_div_four, inner_eq_sum_norm_sq_div_four]
+  simp only [← map_add, ← map_sub, ← map_smul, hU g]
+
+/-- 同一等价先顺后逆地共轭一个置换等于不动。 -/
+lemma permCongr_symm_permCongr (d : ℕ) (g : Equiv.Perm (Slot d)) :
+    (slotFinEquiv d).symm.permCongr ((slotFinEquiv d).permCongr g) = g := by
+  ext x
+  simp [Equiv.permCongr_apply, Equiv.symm_symm]
+
+/-- `cardLabels` 的共轭作用分解为「桥共轭 ∘ 标签共轭」：
+`cardLabels d μ = (slotFinEquiv d).trans (labels μ).symm` 的定义展开，
+经 `Equiv.permCongrHom_trans`（该等式本身是 `rfl`）落到逐点形式。 -/
+lemma cardLabels_permCongr (d : ℕ) (μ : CubeShuffle.Specht.Shapes (2^d))
+    (g : Equiv.Perm (Slot d)) :
+    (CubeShuffle.Specht.cardLabels d μ).permCongr g =
+      (CubeShuffle.Specht.labels μ).symm.permCongr ((slotFinEquiv d).permCongr g) := by
+  have h1 : (CubeShuffle.Specht.cardLabels d μ).permCongrHom =
+      (slotFinEquiv d).permCongrHom.trans (CubeShuffle.Specht.labels μ).symm.permCongrHom := by
+    show ((slotFinEquiv d).trans (CubeShuffle.Specht.labels μ).symm).permCongrHom = _
+    rw [Equiv.permCongrHom_trans]
+  exact DFunLike.congr_fun h1 g
+
+/-- 分类侧的标记表示沿桥拉回到 `Perm (Slot d)` 上。 -/
+def deckLabelledRep {d : ℕ} (μ : CubeShuffle.Specht.Shapes (2^d)) :
+    Representation ℂ (Equiv.Perm (Slot d)) (CubeShuffle.Specht.space μ.1) :=
+  (CubeShuffle.Specht.labelledRepresentation μ).comp (slotFinEquiv d).permCongrHom.toMonoidHom
+
+lemma deckLabelledRep_apply {d : ℕ} (μ : CubeShuffle.Specht.Shapes (2^d))
+    (g : Equiv.Perm (Slot d)) (v : CubeShuffle.Specht.space μ.1) :
+    deckLabelledRep μ g v = CubeShuffle.Specht.representation μ.1
+      ((CubeShuffle.Specht.labels μ).symm.permCongr ((slotFinEquiv d).permCongr g)) v := rfl
+
+/-- 拉回标记表示 ≅ `cardRepresentation d μ`：交织子是 Hilbert 模型映射
+`spaceHilbertEquiv μ.1`（即 `unitaryEquiv` 的底层等价），群作用经
+`cardLabels_permCongr` 对齐。 -/
+def spechtToCardEquiv {d : ℕ} (μ : CubeShuffle.Specht.Shapes (2^d)) :
+    Representation.Equiv (deckLabelledRep μ) (CubeShuffle.Specht.cardRepresentation d μ) :=
+  Representation.Equiv.mk (CubeShuffle.Specht.spaceHilbertEquiv μ.1) fun g =>
+    LinearMap.ext fun v =>
+      calc CubeShuffle.Specht.spaceHilbertEquiv μ.1 (deckLabelledRep μ g v)
+          = CubeShuffle.Specht.spaceHilbertEquiv μ.1 (CubeShuffle.Specht.representation μ.1
+              ((CubeShuffle.Specht.labels μ).symm.permCongr ((slotFinEquiv d).permCongr g)) v) :=
+            congrArg (CubeShuffle.Specht.spaceHilbertEquiv μ.1) (deckLabelledRep_apply μ g v)
+        _ = CubeShuffle.Specht.unitaryRepresentation μ.1
+              ((CubeShuffle.Specht.labels μ).symm.permCongr ((slotFinEquiv d).permCongr g))
+              (CubeShuffle.Specht.spaceHilbertEquiv μ.1 v) :=
+            Representation.IntertwiningMap.isIntertwining _ _
+              (CubeShuffle.Specht.unitaryEquiv μ.1).toIntertwiningMap _ _
+        _ = CubeShuffle.Specht.unitaryRepresentation μ.1
+              ((CubeShuffle.Specht.cardLabels d μ).permCongr g)
+              (CubeShuffle.Specht.spaceHilbertEquiv μ.1 v) := by
+            rw [← cardLabels_permCongr]
+        _ = (CubeShuffle.Specht.cardRepresentation d μ) g
+              (CubeShuffle.Specht.spaceHilbertEquiv μ.1 v) := rfl
+
+/-- 拉回标记表示 ≅ `ρ`：把分类等价 `T₀` 沿桥读回（`T₀` 的底层线性等价不变，
+群作用经 `permCongr_symm_permCongr` 对齐）。 -/
+def labelledToRepEquiv {d D : ℕ} (ρ : Representation ℂ (Equiv.Perm (Slot d)) (RepSpace D))
+    (μ : CubeShuffle.Specht.Shapes (2^d))
+    (T₀ : Representation.Equiv (CubeShuffle.Specht.labelledRepresentation μ) (transportedRep ρ)) :
+    Representation.Equiv (deckLabelledRep μ) ρ :=
+  Representation.Equiv.mk T₀.toLinearEquiv fun g =>
+    LinearMap.ext fun v =>
+      calc T₀.toLinearEquiv (deckLabelledRep μ g v)
+          = T₀.toLinearEquiv (CubeShuffle.Specht.representation μ.1
+              ((CubeShuffle.Specht.labels μ).symm.permCongr ((slotFinEquiv d).permCongr g)) v) :=
+            congrArg T₀.toLinearEquiv (deckLabelledRep_apply μ g v)
+        _ = T₀.toLinearEquiv (CubeShuffle.Specht.labelledRepresentation μ
+              ((slotFinEquiv d).permCongr g) v) := rfl
+        _ = transportedRep ρ ((slotFinEquiv d).permCongr g) (T₀.toLinearEquiv v) :=
+            Representation.IntertwiningMap.isIntertwining _ _ T₀.toIntertwiningMap _ _
+        _ = ρ g (T₀.toLinearEquiv v) := by
+            rw [transportedRep_apply, permCongr_symm_permCongr]
+
+/-- 主等价：`ρ ≅ cardRepresentation d μ`（同在 `Perm (Slot d)` 上）。 -/
+def repEquivCard {d D : ℕ} (ρ : Representation ℂ (Equiv.Perm (Slot d)) (RepSpace D))
+    (μ : CubeShuffle.Specht.Shapes (2^d))
+    (T₀ : Representation.Equiv (CubeShuffle.Specht.labelledRepresentation μ) (transportedRep ρ)) :
+    Representation.Equiv ρ (CubeShuffle.Specht.cardRepresentation d μ) :=
+  (labelledToRepEquiv ρ μ T₀).symm.trans (spechtToCardEquiv μ)
+
+lemma repEquivCard_intertwines {d D : ℕ}
+    (ρ : Representation ℂ (Equiv.Perm (Slot d)) (RepSpace D))
+    (μ : CubeShuffle.Specht.Shapes (2^d))
+    (T₀ : Representation.Equiv (CubeShuffle.Specht.labelledRepresentation μ) (transportedRep ρ))
+    (g : Equiv.Perm (Slot d)) (v : RepSpace D) :
+    (repEquivCard ρ μ T₀).toLinearEquiv (ρ g v) =
+      (CubeShuffle.Specht.cardRepresentation d μ) g ((repEquivCard ρ μ T₀).toLinearEquiv v) :=
+  Representation.IntertwiningMap.isIntertwining _ _
+    (repEquivCard ρ μ T₀).toIntertwiningMap g v
+
+/-- 主等价的底层线性映射非零（Specht 空间有非零 polytabloid，经 Hilbert 模型映射
+送入 `hilbertSpace μ.1`）。 -/
+lemma repEquivCard_ne_zero {d D : ℕ}
+    (ρ : Representation ℂ (Equiv.Perm (Slot d)) (RepSpace D))
+    (μ : CubeShuffle.Specht.Shapes (2^d))
+    (T₀ : Representation.Equiv (CubeShuffle.Specht.labelledRepresentation μ) (transportedRep ρ)) :
+    (repEquivCard ρ μ T₀).toLinearEquiv.toLinearMap ≠ 0 := by
+  intro h0
+  have hw : (CubeShuffle.Specht.spaceHilbertEquiv μ.1
+      ⟨CubeShuffle.Specht.polytabloid μ.1, CubeShuffle.Specht.polytabloid_mem_space μ.1⟩ :
+      CubeShuffle.Specht.hilbertSpace μ.1) ≠ 0 := by
+    intro hz
+    apply CubeShuffle.Specht.polytabloid_ne_zero μ.1
+    have h0' : (⟨CubeShuffle.Specht.polytabloid μ.1,
+          CubeShuffle.Specht.polytabloid_mem_space μ.1⟩ : CubeShuffle.Specht.space μ.1) = 0 :=
+      (CubeShuffle.Specht.spaceHilbertEquiv μ.1).injective (by
+        rw [hz]; exact (map_zero _).symm)
+    exact congrArg Subtype.val h0'
+  have happ : (repEquivCard ρ μ T₀).toLinearEquiv ((repEquivCard ρ μ T₀).toLinearEquiv.symm
+      (CubeShuffle.Specht.spaceHilbertEquiv μ.1
+        ⟨CubeShuffle.Specht.polytabloid μ.1, CubeShuffle.Specht.polytabloid_mem_space μ.1⟩)) = 0 :=
+    LinearMap.ext_iff.mp h0 _
+  rw [LinearEquiv.apply_symm_apply] at happ
+  exact hw happ
+
+open CubeShuffle.Specht CubeShuffle.WeightedSweep in
+/-- 每个不可约酉表示的扫描 Fourier 算子范数等于某个 cardRepresentation 上的引擎算子范数。 -/
+theorem exists_equiv_opNorm_fourierAt_eq {d : ℕ} (hd : 0 < d) {D : ℕ}
+    (ρ : Representation ℂ (Equiv.Perm (Slot d)) (RepSpace D))
+    [Representation.IsIrreducible ρ] (hU : IsUnitaryRep ρ) :
+    ∃ μ : Shapes (2^d), (dimension μ.1 = (D : ℝ)) ∧
+      ‖ThorpFourRow.fourierAt (ThorpFourRow.binaryLaw d) ρ‖ =
+        ‖CubeShuffle.WeightedSweep.fourierSweep d μ‖ := by
+  classical
+  obtain ⟨μ, ⟨T₀⟩⟩ := labelled_complete (transportedRep ρ)
+  refine ⟨μ, ?_, ?_⟩
+  · -- 维数：等价 ⟹ finrank 相等，两端各自对齐到 `space μ.1` 与 `D`
+    have hfin : Module.finrank ℂ (RepSpace D) = Module.finrank ℂ (space μ.1) := by
+      have h1 : Module.finrank ℂ (RepSpace D) = Module.finrank ℂ (hilbertSpace μ.1) :=
+        (repEquivCard ρ μ T₀).toLinearEquiv.finrank_eq
+      rw [finrank_hilbertSpace] at h1
+      exact h1
+    have hfinD : Module.finrank ℂ (RepSpace D) = D := by
+      show Module.finrank ℂ (EuclideanSpace ℂ (Fin D)) = D
+      exact finrank_euclideanSpace_fin
+    have hfinN : Module.finrank ℂ (space μ.1) = D := hfin.symm.trans hfinD
+    show ((Module.finrank ℂ (space μ.1) : ℕ) : ℝ) = (D : ℝ)
+    rw [hfinN]
+  · -- 范数：律桥对齐两侧律，交织传输对齐两侧算子
+    have hlaw : ∀ g : Equiv.Perm (Slot d),
+        CubeShuffle.WeightedSweep.sweepLaw d g = ThorpFourRow.binaryLaw d g := by
+      intro g
+      rw [LawBridge.cube_sweepLaw_eq_sweepLaw d hd]
+      show BinaryCoordinateSweeps.convolutionPower (BinaryCoordinateSweeps.binaryLaw d) 1 g = _
+      rw [BinaryCoordinateSweeps.convolutionPower_one]
+      exact (ThorpFourRow.binaryLaw_eq d g).symm
+    have hnorm := OAI.PartialPermutation.opNorm_fourier_eq_of_intertwining ρ
+      (cardRepresentation d μ) (isUnitary_of_isUnitaryRep ρ hU)
+      (fun g v w => cardRepresentation_unitary d μ g v w)
+      (repEquivCard ρ μ T₀).toLinearEquiv (repEquivCard_intertwines ρ μ T₀)
+      (repEquivCard_ne_zero ρ μ T₀) (CubeShuffle.WeightedSweep.sweepLaw d)
+    -- 引擎侧：`fourierSweep` 的 CLM 和与 `toCLM (complexFourier …)` 逐点相同
+    have hfR : ‖fourierSweep d μ‖ =
+        ‖LinearMap.toContinuousLinearMap (OAI.PartialPermutation.complexFourier
+          (cardRepresentation d μ) (fun g => (CubeShuffle.WeightedSweep.sweepLaw d g : ℂ)))‖ := by
+      rw [fourierSweep_eq_group_sum]
+      congr 1
+      apply ContinuousLinearMap.ext
+      intro v
+      rw [sum_apply]
+      simp only [smul_apply,
+        CubeShuffle.UnitaryFinite.continuousRepresentation_apply]
+      show (∑ g : Equiv.Perm (CubeShuffle.Card d), (CubeShuffle.WeightedSweep.sweepLaw d g : ℂ) •
+          (cardRepresentation d μ) g v) =
+        (∑ g : Equiv.Perm (CubeShuffle.Card d), (CubeShuffle.WeightedSweep.sweepLaw d g : ℂ) •
+          (cardRepresentation d μ) g) v
+      rw [LinearMap.sum_apply]
+      apply Finset.sum_congr rfl
+      intro g _
+      rw [LinearMap.smul_apply]
+    calc ‖ThorpFourRow.fourierAt (ThorpFourRow.binaryLaw d) ρ‖
+        = ‖ThorpFourRow.fourierAt (CubeShuffle.WeightedSweep.sweepLaw d) ρ‖ := by
+            have hfun : ThorpFourRow.binaryLaw d = CubeShuffle.WeightedSweep.sweepLaw d :=
+              funext fun g => (hlaw g).symm
+            rw [hfun]
+      _ = ‖LinearMap.toContinuousLinearMap (OAI.PartialPermutation.complexFourier ρ
+            (fun g => (CubeShuffle.WeightedSweep.sweepLaw d g : ℂ)))‖ := rfl
+      _ = ‖LinearMap.toContinuousLinearMap (OAI.PartialPermutation.complexFourier
+            (cardRepresentation d μ)
+            (fun g => (CubeShuffle.WeightedSweep.sweepLaw d g : ℂ)))‖ := hnorm.symm
+      _ = ‖fourierSweep d μ‖ := hfR.symm
+
+end ThorpFourRow
+
+/-! ## Slice G8-δ: the terminal assembly
+
+`FixedMomentDegreeSaving` from the engine through the chain; the upper bound
+re-exported from the tree's `binary_main` through the pointwise bridges; the
+lower bound is `physicalLaw_tv_ge` (slice G8-β). -/
+
+namespace ThorpFourRow
+
+/-- `convolutionPower p 1 = p` on the challenge's copies (via the pointwise
+bridge to the repository's `PointMassOne.convolutionPower_one`). -/
+lemma convolutionPower_one {G : Type*} [Group G] [Fintype G] (p : G → ℝ) :
+    convolutionPower p 1 = p := by
+  classical
+  funext g
+  rw [convolutionPower_eq, BinaryCoordinateSweeps.convolutionPower_one]
+
+/-- The second-moment norm is the squared Fourier norm (the C* identity
+`‖T T*‖ = ‖T‖²`, via `norm_adjoint_comp_self`). -/
+lemma sweepSecondMoment_norm {d D : ℕ}
+    (ρ : Representation ℂ (Equiv.Perm (Slot d)) (RepSpace D)) :
+    ‖sweepSecondMoment ρ‖ = ‖fourierAt (convolutionPower (binaryLaw d) 1) ρ‖ ^ 2 := by
+  classical
+  unfold sweepSecondMoment
+  simp only []
+  have h := ContinuousLinearMap.norm_adjoint_comp_self
+    (ContinuousLinearMap.adjoint (fourierAt (convolutionPower (binaryLaw d) 1) ρ))
+  rw [ContinuousLinearMap.adjoint_adjoint, LinearIsometryEquiv.norm_map] at h
+  rw [h, pow_two]
+
+/-- Theorem 1.2 (a fixed moment with a degree saving): the weighted-Schatten
+engine through the representation chain. The witnesses are `r = 2⌈pStar⌉` and
+`η = 3/4`. -/
+theorem fixedMomentDegreeSaving : FixedMomentDegreeSaving := by
+  classical
+  obtain ⟨W, pStar, p, hW, hpStar2, hp, hbound⟩ := CubeShuffle.WeightedSweep.weighted_sweep_moments
+  have hceil : 2 ≤ Nat.ceil pStar := by
+    have h := hpStar2.trans (Nat.le_ceil _)
+    exact_mod_cast h
+  have hr2 : 2 ≤ 2 * Nat.ceil pStar := by omega
+  refine ⟨2 * Nat.ceil pStar, hr2, ⟨Nat.ceil pStar, two_mul _⟩, 3/4, by norm_num, ?_⟩
+  intro d hd D ρ hirr hU
+  obtain ⟨μ, hdim, hnorm⟩ := @exists_equiv_opNorm_fourierAt_eq _ hd _ ρ hirr hU
+  have htr := sweepMomentTrace_le ρ (r := 2 * Nat.ceil pStar) ⟨Nat.ceil pStar, two_mul _⟩ hr2
+  have hB : ‖sweepSecondMoment ρ‖ = ‖fourierAt (binaryLaw d) ρ‖ ^ 2 := by
+    rw [sweepSecondMoment_norm, convolutionPower_one]
+  have hD : (1:ℝ) ≤ (D : ℝ) := by
+    rw [← hdim]
+    exact CubeShuffle.WeightedSweep.dimension_one_le μ.1
+  have heng : ‖CubeShuffle.WeightedSweep.fourierSweep d μ‖ ≤ (D : ℝ) ^ (-3 / (4 * pStar)) := by
+    rw [← hdim]
+    exact (hbound d (by omega) μ).2.2.2
+  calc (D : ℝ) * sweepMomentTrace ρ (2 * Nat.ceil pStar)
+      ≤ (D : ℝ) * ((D : ℝ) * ‖sweepSecondMoment ρ‖ ^ (2 * Nat.ceil pStar)) :=
+        mul_le_mul_of_nonneg_left htr (Nat.cast_nonneg _)
+    _ = (D : ℝ)^2 * ‖sweepSecondMoment ρ‖ ^ (2 * Nat.ceil pStar) := by ring
+    _ = (D : ℝ)^2 * (‖fourierAt (binaryLaw d) ρ‖ ^ 2) ^ (2 * Nat.ceil pStar) := by
+        rw [hB]
+    _ = (D : ℝ)^2 * ‖fourierAt (binaryLaw d) ρ‖ ^ (2 * (2 * Nat.ceil pStar)) := by
+        rw [← pow_mul]
+    _ = (D : ℝ)^2 * ‖CubeShuffle.WeightedSweep.fourierSweep d μ‖ ^ (2 * (2 * Nat.ceil pStar)) := by rw [hnorm]
+    _ ≤ (D : ℝ)^2 * ((D : ℝ) ^ (-3 / (4 * pStar))) ^ (2 * (2 * Nat.ceil pStar)) := by
+        apply mul_le_mul_of_nonneg_left _ (by positivity)
+        exact pow_le_pow_left₀ (ContinuousLinearMap.opNorm_nonneg _) heng _
+    _ = (D : ℝ) ^ (2 + (-3 / (4 * pStar)) * (4 * (Nat.ceil pStar : ℝ))) := by
+        have hD0 : (0:ℝ) < (D : ℝ) := lt_of_lt_of_le zero_lt_one hD
+        have hN : ((2 * (2 * Nat.ceil pStar) : ℕ) : ℝ) = 4 * (Nat.ceil pStar : ℝ) := by
+          push_cast
+          ring
+        rw [← Real.rpow_natCast ((D : ℝ) ^ (-3 / (4 * pStar))) (2 * (2 * Nat.ceil pStar)),
+          hN, ← Real.rpow_mul (Nat.cast_nonneg (D : ℕ)),
+          ← Real.rpow_natCast (D : ℝ) 2, ← Real.rpow_add hD0]
+        congr 1
+    _ ≤ (D : ℝ) ^ ((1 - 3/4 : ℝ)) := by
+        have hcs : (pStar : ℝ) ≤ (Nat.ceil pStar : ℝ) := Nat.le_ceil _
+        have hpc : (0:ℝ) < pStar := by linarith [hpStar2]
+        have hpne : pStar ≠ 0 := hpc.ne'
+        have hdiv : (3:ℝ) ≤ 3 * (Nat.ceil pStar : ℝ) / pStar := by
+          rw [le_div_iff₀ hpc]
+          exact mul_le_mul_of_nonneg_left hcs (by norm_num)
+        have hrewrite : (2:ℝ) + (-3 / (4 * pStar)) * (4 * (Nat.ceil pStar : ℝ)) =
+            2 - 3 * (Nat.ceil pStar : ℝ) / pStar := by
+          field_simp
+          ring
+        have hexp : (2:ℝ) + (-3 / (4 * pStar)) * (4 * (Nat.ceil pStar : ℝ)) ≤ 1 - 3/4 := by
+          rw [hrewrite]
+          linarith [hdiv]
+        exact Real.rpow_le_rpow_of_exponent_le hD hexp
+
+/-- The upper bound: an absolute number of sweeps mixes, uniformly over decks
+(re-export of the tree's `binary_main` through the pointwise bridges). -/
+theorem optimalOrderThorpMixing_upper :
+    (∃ q : ℕ, ∀ ε : ℝ, 0 < ε → ∃ d₀ : ℕ, ∀ d ≥ d₀,
+      ∀ τ : Equiv.Perm (Slot d),
+        totalVariation (fun g => convolutionPower (binaryLaw d) q (g * τ⁻¹))
+          (uniformLaw (Equiv.Perm (Slot d))) ≤ ε) := by
+  classical
+  obtain ⟨w, hw⟩ := BinaryCoordinateSweeps.binary_main.2.2
+  refine ⟨w, fun ε hε => ?_⟩
+  obtain ⟨d₀, hd₀⟩ := hw ε hε
+  refine ⟨d₀, fun d hd τ => ?_⟩
+  have hpoint : ∀ g : Equiv.Perm (Slot d),
+      convolutionPower (binaryLaw d) w (g * τ⁻¹) =
+        BinaryCoordinateSweeps.sweepLaw d w (g * τ⁻¹) := by
+    intro g
+    show convolutionPower (binaryLaw d) w (g * τ⁻¹) =
+      BinaryCoordinateSweeps.convolutionPower (BinaryCoordinateSweeps.binaryLaw d) w (g * τ⁻¹)
+    rw [show binaryLaw d = BinaryCoordinateSweeps.binaryLaw d from funext (binaryLaw_eq d)]
+    exact convolutionPower_eq _ _ _
+  have hTV : totalVariation (fun g => convolutionPower (binaryLaw d) w (g * τ⁻¹))
+      (uniformLaw (Equiv.Perm (Slot d))) =
+      BinaryCoordinateSweeps.totalVariation (fun g => BinaryCoordinateSweeps.sweepLaw d w (g * τ⁻¹))
+        (BinaryCoordinateSweeps.uniformLaw (Equiv.Perm (Slot d))) := by
+    rw [totalVariation_eq]
+    congr 1
+    funext g
+    exact hpoint g
+  rw [hTV]
+  exact hd₀ d hd τ
+
+/-- The lower bound (paper's equation (3)): slice G8-β's `physicalLaw_tv_ge`. -/
+theorem optimalOrderThorpMixing_lower :
+    (∀ d : ℕ, ∀ hd : 0 < d, ∀ t : ℕ,
+      totalVariation (physicalLaw d hd t) (uniformLaw (Equiv.Perm (Slot d))) ≥
+        1 - (2 : ℝ) ^ (t * 2 ^ (d - 1)) / (Nat.factorial (2 ^ d) : ℝ)) :=
+  fun d hd t => physicalLaw_tv_ge d hd t
+
+end ThorpFourRow
+
+/-- The segment `lean/docs/238.md` excludes: from the strict four-row permanent
+inequality to the Thorp mixing consequence. -/
+theorem four_row_moment_mixing_consequence :
+    ThorpFourRow.FixedMomentDegreeSaving ∧ ThorpFourRow.OptimalOrderThorpMixing :=
+  ⟨ThorpFourRow.fixedMomentDegreeSaving, ThorpFourRow.optimalOrderThorpMixing_upper,
+    ThorpFourRow.optimalOrderThorpMixing_lower⟩
 
 end
 
